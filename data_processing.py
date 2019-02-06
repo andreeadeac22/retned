@@ -1,8 +1,8 @@
 
 # Goal: for each file, get (javadoc comment, code)
-# Check which javadoc comments i want: class, method, in-method?
-# Filter comments? Length of tokens?
-# How to store code?
+# Check which javadoc comments i want: class, method, in-method? -- functions of less than 150 tokens
+# Filter comments? Length of tokens? ^ above
+# How to store code? -- text/ vocab embedding  -- one-hot for words?
 # Build tensors, convert to cuda
 
 import os
@@ -15,87 +15,101 @@ proto_list = "proto_list.txt"
 
 nodeid_dict_file = "nodeids_dict.pickle"
 
-def parse_file(file_path):
+def parse_file(file_path, comment_code_dict, methodlen_dict):
     with open(file_path, "rb") as f:
         g = Graph()
-        g.ParseFromString(f.read())
-        """
+        file_content = f.read()
+        g.ParseFromString(file_content)
+
+        idnode_dict = {}
         for n in g.node:
-            print(n.contents)
-            if n.type is FeatureNode.COMMENT_JAVADOC:
-                print("Javadoc comment")
-        """
-
-        """
-        root = g.ast_root
-        root_id = g.ast_root.id
-        print("g.ast_root", root)
-
-        for e in g.edge:
-            if e.sourceId == root_id:
-                print("FOUND, other is: ")
-                for n in g.node:
-                    if n.id == e.destinationId:
-                        print(n)
-
-            if e.destinationId == root_id:
-                print("FOUND, other is: ")
-                for n in g.node:
-                    if n.id == e.sourceId:
-                        print(n)
-        """
-        node_dict = {}
-        for n in g.node:
-            node_dict[n.id] = n
-
-        #pickle.dump(node_dict, open(nodeid_dict_file, "wb")
+            idnode_dict[n.id] = n
 
 
         javadoc_method = 0
         javadoc_class = 0
         javadoc_variable = 0
 
+
         for e in g.edge:
             if e.type is FeatureEdge.COMMENT:
-                source_node = node_dict[e.sourceId]
-                destination_node = node_dict[e.destinationId]
+                source_node = idnode_dict[e.sourceId]
+                destination_node = idnode_dict[e.destinationId]
                 if source_node.type == FeatureNode.COMMENT_JAVADOC:
-                    if destination_node.contents == "METHOD":
-                        javadoc_method +=1
                     if destination_node.contents == "VARIABLE":
                         javadoc_variable += 1
                     if destination_node.contents == "COMPILATION_UNIT":
                         javadoc_class += 1
 
-        return javadoc_class, javadoc_method, javadoc_variable
+                    if destination_node.contents == "METHOD":
+                        javadoc_method +=1
+                        method_list = []
+                        #TODO: get list of tokens
+                        startpos = destination_node.startPosition
+                        endpos = destination_node.endPosition
+                        for n in g.node:
+                            if n.startPosition >= startpos and n.endPosition <= endpos:
+                                if n.type == FeatureNode.TOKEN:
+                                    method_list += [n.contents]
+                                if n.type == FeatureNode.IDENTIFIER_TOKEN:
+                                    method_list += [n.contents]
+
+                        method_token_length = len(method_list)
+
+                        if method_token_length < 151:
+                            if not method_token_length in methodlen_dict:
+                                methodlen_dict[method_token_length] = 1
+                            else:
+                                methodlen_dict[method_token_length] += 1
+
+                            if source_node.contents not in comment_code_dict:
+                                comment_code_dict[source_node.contents] = method_list
+                            #else:
+                            #    print(source_node.contents)
+
+        return comment_code_dict, methodlen_dict
 
 
 def build_dataset(fname= proto_list):
     f = open(fname, "r")
     content = f.readlines()
     content = [x.strip() for x in content]
-    # total_token_count = 0 -> 9807850
-    # total_javadoc_comment_count = 0 -> 20779
-    # token_contents_list = []
-    total_javadoc_class = 0
-    total_javadoc_method = 0
-    total_javadoc_variable = 0
+
+    comment_code_dict = {}   # key is javadoc comment, value is list of method tokens
+    methodlen_dict = {}      #key is number of token per method, value is how many methods with that many tokens exist
+
     for line in content:
-        # total_token_count += return_token_count(line)
-        # total_javadoc_comment_count += return_javadoc_comment_count(line)
-        # describe_types(line)
-        # token_contents_list = get_contents(line, token_contents_list)
-        javadoc_class, javadoc_met, javadoc_var = parse_file(line)
-        total_javadoc_class += javadoc_class
-        total_javadoc_method += javadoc_met
-        total_javadoc_variable += javadoc_var
+        comment_code_dict, methodlen_dict = parse_file(line, comment_code_dict, methodlen_dict)
 
-    print("Javadoc method ", total_javadoc_method)
-    print("Javadoc class ", total_javadoc_class)
-    print("Javadoc variable", total_javadoc_variable)
+    comment_code_file = open("commentcode.pickle", "wb")
+    pickle.dump(comment_code_dict, comment_code_file)
+
+    comment_code_txt = open("commentcode.txt", "w")
+    for key in comment_code_dict:
+        print(key, comment_code_dict[key], file=comment_code_txt)
 
 
-def try_parse_file():
-    parse_file("/Users/andreea/Documents/Part III/MLforProg(R252)/aid25/Documentation.java.proto")
+    methodlen_dict_file = open("methodlen.pickle", "wb")
+    pickle.dump(methodlen_dict, methodlen_dict_file)
 
-build_dataset()
+    methodlen_dict_txt = open("methodlen.txt", "w")
+    for key in methodlen_dict:
+        print(key, methodlen_dict[key], file=methodlen_dict_txt)
+
+
+    print("Dict length", len(comment_code_dict))
+
+
+def print_tokens():
+    with open("/Users/andreea/Documents/Part III/MLforProg(R252)/aid25/Documentation.java.proto", "rb") as f:
+        g = Graph()
+        file_content = f.read()
+        g.ParseFromString(file_content)
+        print("Tokens)")
+        for n in g.node:
+            if n.type is FeatureNode.TOKEN or n.type is FeatureNode.IDENTIFIER_TOKEN:
+                print(n.contents)
+#get_text_chunk()
+#print_tokens()
+#try_parse_file()
+#build_dataset()
