@@ -5,15 +5,20 @@
 # How to store code? -- text/ vocab embedding  -- one-hot for words?
 # Build tensors, convert to cuda
 
+
+
+# Split train/test on same directory -- not possible
+# White list
+
 import os
 import sys
 import _pickle as pickle
+import collections
+import re
 
 from graph_pb2 import *
 
 proto_list = "proto_list.txt"
-
-nodeid_dict_file = "nodeids_dict.pickle"
 
 def parse_file(file_path, comment_code_dict, methodlen_dict):
     with open(file_path, "rb") as f:
@@ -81,8 +86,9 @@ def build_dataset(fname= proto_list):
     for line in content:
         comment_code_dict, methodlen_dict = parse_file(line, comment_code_dict, methodlen_dict)
 
-    comment_code_file = open("commentcode.pickle", "wb")
-    pickle.dump(comment_code_dict, comment_code_file)
+    comment_code_file_write = open("commentcode.pickle", "wb")
+    pickle.dump(comment_code_dict, comment_code_file_write)
+
 
     comment_code_txt = open("commentcode.txt", "w")
     for key in comment_code_dict:
@@ -96,7 +102,6 @@ def build_dataset(fname= proto_list):
     for key in methodlen_dict:
         print(key, methodlen_dict[key], file=methodlen_dict_txt)
 
-
     print("Dict length", len(comment_code_dict))
 
 
@@ -109,7 +114,72 @@ def print_tokens():
         for n in g.node:
             if n.type is FeatureNode.TOKEN or n.type is FeatureNode.IDENTIFIER_TOKEN:
                 print(n.contents)
-#get_text_chunk()
-#print_tokens()
-#try_parse_file()
-#build_dataset()
+
+
+def tokens2vocab():
+    comment_code_file_read = open("commentcode.pickle", "rb")
+    comment_code_dict = pickle.load(comment_code_file_read)
+
+    token_freq = {}
+    for comment in comment_code_dict:
+        token_list = comment_code_dict[comment]
+        for token in token_list:
+            if token in token_freq:
+                token_freq[token] += 1
+            else:
+                token_freq[token] = 1
+
+    token_freq_file = open("tokenfreq.pickle", "wb")
+    pickle.dump(token_freq, token_freq_file)
+
+    token_freq_txt = open("tokenfreq.txt", "w")
+    sorted_by_value = sorted(token_freq.items(), key=lambda kv: kv[1])
+    for k,v in sorted_by_value:
+        print(k, v, file=token_freq_txt)
+
+
+def comment2list():
+    comment_code_file_read = open("commentcode.pickle", "rb")
+    comment_code_dict = pickle.load(comment_code_file_read)
+    delimiters = ' ', "*", "\n", "/", "\t"
+    regexPattern = '|'.join(map(re.escape, delimiters))
+
+    comment2list_dict = {}
+    comment2list_txt = open("comment2list.txt", "w")
+    comment2list_file = open("comment2list.pickle", "wb")
+
+    for comment in comment_code_dict:
+        comment_lines = comment.splitlines()
+        comment_lines = comment_lines[1:len(comment_lines)]
+        word_list = []
+        for comment_line in comment_lines:
+            line_words = re.split(regexPattern, comment_line)
+            line_words = list(filter(None, line_words))
+            word_list += line_words
+
+        comment2list_dict[comment] = word_list
+        print(comment, comment2list_dict[comment], file=comment2list_txt)
+
+    pickle.dump(comment2list_dict, comment2list_file)
+
+
+def commentwords2vocab():
+    comment2list_read = open("comment2list.pickle", "rb")
+    comment2list_dict = pickle.load(comment2list_read)
+
+    commentword_freq = {}
+    for comment in comment2list_dict:
+        word_list = comment2list_dict[comment]
+        for word in word_list:
+            if word in commentword_freq:
+                commentword_freq[word] += 1
+            else:
+                commentword_freq[word] = 1
+
+    commentword_freq_file = open("commentwordfreq.pickle", "wb")
+    pickle.dump(commentword_freq, commentword_freq_file)
+
+    commentword_freq_txt = open("commentwordfreq.txt", "w")
+    sorted_by_value = sorted(commentword_freq.items(), key=lambda kv: kv[1])
+    for k,v in sorted_by_value:
+        print(k, v, file=commentword_freq_txt)
