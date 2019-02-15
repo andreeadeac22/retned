@@ -15,8 +15,13 @@ import sys
 import _pickle as pickle
 import collections
 import re
+import numpy as np
+from random import shuffle
+import torch
 
-from graph_pb2 import *
+#from graph_pb2 import *
+from vocabulary import *
+from constants import *
 
 proto_list = "proto_list.txt"
 
@@ -105,16 +110,6 @@ def build_dataset(fname= proto_list):
     print("Dict length", len(comment_code_dict))
 
 
-def print_tokens():
-    with open("/Users/andreea/Documents/Part III/MLforProg(R252)/aid25/Documentation.java.proto", "rb") as f:
-        g = Graph()
-        file_content = f.read()
-        g.ParseFromString(file_content)
-        print("Tokens)")
-        for n in g.node:
-            if n.type is FeatureNode.TOKEN or n.type is FeatureNode.IDENTIFIER_TOKEN:
-                print(n.contents)
-
 
 def tokens2vocab():
     comment_code_file_read = open("commentcode.pickle", "rb")
@@ -141,7 +136,7 @@ def tokens2vocab():
 def comment2list():
     comment_code_file_read = open("commentcode.pickle", "rb")
     comment_code_dict = pickle.load(comment_code_file_read)
-    delimiters = ' ', "*", "\n", "/", "\t"
+    delimiters = ' ', "*", "\n", "/", "\t", "(", ")", "<", ">", "{", "}"
     regexPattern = '|'.join(map(re.escape, delimiters))
 
     comment2list_dict = {}
@@ -163,19 +158,22 @@ def comment2list():
     pickle.dump(comment2list_dict, comment2list_file)
 
 
-def commentwords2vocab():
+def build_intmatrix():  #commentwords2vocab
     comment2list_read = open("comment2list.pickle", "rb")
     comment2list_dict = pickle.load(comment2list_read)
 
     commentword_freq = {}
+    max_comment_len = 0
     for comment in comment2list_dict:
         word_list = comment2list_dict[comment]
+        if len(word_list) > max_comment_len:
+            max_comment_len = len(word_list)
         for word in word_list:
             if word in commentword_freq:
                 commentword_freq[word] += 1
             else:
                 commentword_freq[word] = 1
-
+    """
     commentword_freq_file = open("commentwordfreq.pickle", "wb")
     pickle.dump(commentword_freq, commentword_freq_file)
 
@@ -183,3 +181,78 @@ def commentwords2vocab():
     sorted_by_value = sorted(commentword_freq.items(), key=lambda kv: kv[1])
     for k,v in sorted_by_value:
         print(k, v, file=commentword_freq_txt)
+    """
+
+    comment_words = list(commentword_freq.keys())
+    shuffle(comment_words)
+    print("Longest comment has {0:3d} tokens".format(max_comment_len))
+    print("There are {0:6d} distinct tokens in comments".format(len(list(comment_words)))) # 14976
+
+
+    codeword_freq_file = open("tokenfreq.pickle", "rb")
+    code_freq = pickle.load(codeword_freq_file)
+    code_tokens = list(code_freq.keys())
+    shuffle(code_tokens)
+    print("There are {0:6d} distinct tokens in code".format(len(list(code_tokens)))) # 21550
+
+    words_ids = {}
+    ids_words = {}
+    for id, word in enumerate(comment_words):
+        words_ids[word] = id
+        ids_words[id] = word
+
+    tokens_ids = {}
+    ids_tokens = {}
+    for id, token in enumerate(code_tokens):
+        tokens_ids[token] = id
+        ids_tokens[id] = token
+
+    #comment_vocab = Vocabulary.create_vocabulary((iter(comment_tokens), comment_counter), max_size=len(list(comment_tokens))) # include all comment tokens
+    #code_vocab = Vocabulary.create_vocabulary(code_tokens, max_size = len(list(code_tokens))) # include all code tokens
+
+    comment_code_file = open("commentcode.pickle", "rb")
+    comment_code_dict = pickle.load(comment_code_file)
+
+    dataset = np.zeros((len(comment_code_dict), max_comment_len + max_code_len +1 ), dtype=int) # 150 is max_code_len
+
+
+    for idx, comment in enumerate(comment_code_dict):
+        code_token_list = comment_code_dict[comment]
+        comment_word_list = comment2list_dict[comment]
+
+        #code_token_list_vocab = np.array(code_vocab.get_id_or_unk_multiple(code_token_list))
+        for id, word in enumerate(comment_word_list):
+            dataset[idx][id] = words_ids[word]
+        for id, token in enumerate(code_token_list):
+            dataset[idx][max_comment_len+id]= tokens_ids[token]
+
+        #code_token_list_vocab = code_vocab.get_id_or_unk_multiple(code_token_list)
+        #comment_word_list_vocab = comment_vocab.get_id_or_unk_multiple(comment_word_list)
+
+        #print(comment_vocab.get_id_or_unk('Plusone'))
+
+        #dataset[idx][:len(code_token_list_vocab)] = code_token_list_vocab
+        #dataset[idx][max_comment_len:max_comment_len + len(comment_word_list_vocab)] = comment_word_list_vocab
+
+    dataset_file = open("dataset.pickle", "wb")
+    pickle.dump(dataset, dataset_file)
+
+    dataset_txt = open("dataset.txt", "w")
+    print(dataset, file=dataset_txt)
+
+
+def split_data():
+    #build_intmatrix()
+    dataset = pickle.load(open("dataset.pickle", "rb"))
+
+    np.random.shuffle(dataset)
+
+    tenth = int(dataset.shape[0] / 10)
+    print("tenth is {0:5d}".format(tenth))
+
+
+    test_data = torch.from_numpy(dataset[9*tenth:])  # 1134, 447
+    valid_data = torch.from_numpy(dataset[8*tenth:9*tenth])   # 1130, 447
+    train_data = torch.from_numpy(dataset[:8*tenth]) # 9040, 447
+
+    return train_data, valid_data, test_data
