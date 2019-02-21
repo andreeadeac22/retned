@@ -42,7 +42,7 @@ class Seq2Seq(nn.Module):
         outputs = torch.zeros(max_len, batch_size, trg_vocab_size).to(self.device)
 
         #last hidden state of the encoder is used as the initial hidden state of the decoder
-        hidden, cell = self.encoder(src)
+        hidden, cell, encoded = self.encoder(src)
 
         #first input to the decoder is the <sos> tokens
         input = trg[0,:]
@@ -50,10 +50,10 @@ class Seq2Seq(nn.Module):
         for t in range(1, max_len): # guess one code token at a time
 
             output, hidden, cell = self.decoder(input, hidden, cell)
-            
+
             outputs[t] = output
             teacher_force = random.random() < teacher_forcing_ratio
             top1 = output.max(1)[1]
             input = (trg[t] if teacher_force else top1)
 
-        return outputs
+        return outputs, encoded

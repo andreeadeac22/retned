@@ -23,13 +23,12 @@ class RNNDecoder(nn.Module):
         self.dropout = dropout
 
         self.embedding = nn.Embedding(output_dim, emb_dim)
-
         self.rnn = nn.LSTM(emb_dim, hid_dim, n_layers, dropout=dropout)
-
         self.out = nn.Linear(hid_dim, output_dim)
 
         self.dropout = nn.Dropout(dropout)
         self.softmax = nn.Softmax()
+
 
     def forward(self, input, hidden, cell):
         #print("RNNDecoder")
@@ -71,7 +70,8 @@ class RNNDecoder(nn.Module):
         #hidden = [n layers, batch size, hid dim]
         #cell = [n layers, batch size, hid dim]
 
-        prediction = self.softmax(self.out(output.squeeze(0)))
+        #prediction = self.softmax(self.out(output.squeeze(0)))
+        prediction = self.out(output.squeeze(0))
 
         #print("prediction shape", prediction.shape)
 
