@@ -198,7 +198,6 @@ def build_vocabs():
             pruned_commentword_dict[k] = v
         else:
             unk_commentword += [k]
-            ids_words[k] = 0
 
 
     comment_words = list(pruned_commentword_dict.keys())
@@ -219,19 +218,23 @@ def build_vocabs():
             pruned_code_dict[k] = v
         else:
             unk_codetoken += [k]
-            ids_tokens[k] = 0
 
     code_tokens = list(pruned_code_dict.keys())
     shuffle(code_tokens)
     print("There are {0:6d} distinct tokens in code".format(len(list(code_tokens)))) # 21550 -> 11394
 
-    for id, word in enumerate(comment_words):
+    for id, word in enumerate(comment_words, 1):
         words_ids[word] = id
         ids_words[id] = word
 
-    for id, token in enumerate(code_tokens):
+    pickle.dump(words_ids, open("word2idcommentvocab.pickle", "wb"))
+    pickle.dump(ids_words, open("commentvocab.pickle", "wb"))
+
+    for id, token in enumerate(code_tokens, 1):
         tokens_ids[token] = id
         ids_tokens[id] = token
+
+    pickle.dump(ids_tokens, open("codevocab.pickle", "wb"))
 
     #comment_vocab = Vocabulary.create_vocabulary((iter(comment_tokens), comment_counter), max_size=len(list(comment_tokens))) # include all comment tokens
     #code_vocab = Vocabulary.create_vocabulary(code_tokens, max_size = len(list(code_tokens))) # include all code tokens
@@ -254,12 +257,12 @@ def build_vocabs():
             if word in words_ids:
                 dataset[idx][id] = words_ids[word]
             else:
-                dataset[idx][id] = 0
+                dataset[idx][id] = src_vocab_size -1
         for id, token in enumerate(code_token_list):
             if token in tokens_ids:
                 dataset[idx][max_comment_len+id]= tokens_ids[token]
             else:
-                dataset[idx][max_comment_len+id] = 0
+                dataset[idx][max_comment_len+id] = trg_vocab_size -1
 
         #code_token_list_vocab = code_vocab.get_id_or_unk_multiple(code_token_list)
         #comment_word_list_vocab = comment_vocab.get_id_or_unk_multiple(comment_word_list)
@@ -283,18 +286,25 @@ def build_inverse_comment_dict():
     wordlist2comment = open("wordlist2comment.pickle", "wb")
     wordlist2comment_file = open("wordlist2comment.txt", "w")
 
+    word2idcomment_dict = pickle.load(open("word2idcommentvocab.pickle", "rb"))
+
     wordlist2comment_dict = {}
 
     for comment in comment2list_dict:
         comment_word_list = comment2list_dict[comment]
-        wordlist = collapse_list2string(comment_word_list)
+        wordlist = collapse_list2string(comment_word_list, word2idcomment_dict)
+
         wordlist2comment_dict[wordlist] = comment
         print(wordlist, comment, file=wordlist2comment_file)
+    
 
     pickle.dump(wordlist2comment_dict, wordlist2comment)
 
 
 def split_data():
+    #build_vocabs()
+    #build_inverse_comment_dict()
+
     dataset = pickle.load(open("dataset.pickle", "rb"))
 
     #random_index = torch.randperm(len(dataset))

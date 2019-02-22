@@ -6,10 +6,10 @@ max_code_len = 150
 max_comment_len = 296
 
 #src_vocab_size = 14976 -- unfiltered
-src_vocab_size = 8278 # after removing words with freq=1
+src_vocab_size = 8278 + 2  # after removing words with freq=1
 
 #trg_vocab_size = 21550
-trg_vocab_size = 11394 #after removing tokens with freq=1
+trg_vocab_size = 11394 + 2 #after removing tokens with freq=1
 
 batch_size = 128
 
@@ -17,13 +17,13 @@ INPUT_DIM = src_vocab_size
 OUTPUT_DIM = trg_vocab_size
 ENC_EMB_DIM = 128
 DEC_EMB_DIM = 128
-HID_DIM = 256
+HID_DIM = 128
 N_LAYERS = 1
 ENC_DROPOUT = 0.3
 DEC_DROPOUT = 0.3
 
 
-N_EPOCHS = 10
+N_EPOCHS = 2
 CLIP = 1
 SAVE_DIR = 'models'
 MODEL_SAVE_PATH = os.path.join(SAVE_DIR, 'seq2seq_model.pt')

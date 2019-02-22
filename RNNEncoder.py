@@ -50,4 +50,4 @@ class RNNEncoder(nn.Module):
 
         #outputs are always from the top hidden layer
 
-        return hidden, cell, outputs
+        return hidden, cell, hidden
