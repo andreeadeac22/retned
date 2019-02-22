@@ -11,19 +11,19 @@ src_vocab_size = 8278 + 2  # after removing words with freq=1
 #trg_vocab_size = 21550
 trg_vocab_size = 11394 + 2 #after removing tokens with freq=1
 
-batch_size = 128
+batch_size = 64
 
 INPUT_DIM = src_vocab_size
 OUTPUT_DIM = trg_vocab_size
 ENC_EMB_DIM = 128
 DEC_EMB_DIM = 128
-HID_DIM = 128
+HID_DIM = 64
 N_LAYERS = 1
 ENC_DROPOUT = 0.3
 DEC_DROPOUT = 0.3
 
 
-N_EPOCHS = 2
+N_EPOCHS = 20
 CLIP = 1
 SAVE_DIR = 'models'
 MODEL_SAVE_PATH = os.path.join(SAVE_DIR, 'seq2seq_model.pt')

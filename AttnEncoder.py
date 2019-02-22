@@ -18,7 +18,7 @@ import math
 import os
 import time
 
-class Encoder(nn.Module):
+class AttnEncoder(nn.Module):
     def __init__(self, input_dim, hid_dim, n_layers, n_heads, pf_dim, encoder_layer, self_attention, positionwise_feedforward, dropout, device):
         super().__init__()
 
@@ -34,27 +34,36 @@ class Encoder(nn.Module):
         self.device = device
 
         self.tok_embedding = nn.Embedding(input_dim, hid_dim)
-        self.pos_embedding = nn.Embedding(1000, hid_dim)
+        self.pos_embedding = nn.Embedding(input_dim, hid_dim)
 
         self.layers = nn.ModuleList([encoder_layer(hid_dim, n_heads, pf_dim, self_attention, positionwise_feedforward, dropout, device)
                                      for _ in range(n_layers)])
-
         self.do = nn.Dropout(dropout)
-
-        self.scale = torch.sqrt(torch.FloatTensor([hid_dim])).to(device)
+        self.scale = torch.sqrt(torch.FloatTensor([hid_dim]))
+        if torch.cuda.is_available():
+            self.scale = self.scale.cuda()
 
     def forward(self, src, src_mask):
 
         #src = [batch size, src sent len]
         #src_mask = [batch size, src sent len]
 
-        pos = torch.arange(0, src.shape[1]).unsqueeze(0).repeat(src.shape[0], 1).to(self.device)
+        pos = torch.arange(0, src.shape[1]).unsqueeze(0).repeat(src.shape[0], 1).type(torch.LongTensor)
+        if torch.cuda.is_available():
+            pos = pos.cuda()
 
-        src = self.do((self.tok_embedding(src) * self.scale) + self.pos_embedding(pos))
+
+        tok_emb = self.tok_embedding(src)
+        pos_emb = self.pos_embedding(pos)
+
+        src = self.do((tok_emb * self.scale) + pos_emb)
+        #src = self.do((tok_emb * self.scale))
 
         #src = [batch size, src sent len, hid dim]
 
         for layer in self.layers:
             src = layer(src, src_mask)
+
+        #print("src.shape", src.shape)
 
         return src

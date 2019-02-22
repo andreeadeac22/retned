@@ -18,7 +18,7 @@ import math
 import os
 import time
 
-class Decoder(nn.Module):
+class AttnDecoder(nn.Module):
     def __init__(self, output_dim, hid_dim, n_layers, n_heads, pf_dim, decoder_layer, self_attention, positionwise_feedforward, dropout, device):
         super().__init__()
 
@@ -52,9 +52,16 @@ class Decoder(nn.Module):
         #trg_mask = [batch size, trg sent len]
         #src_mask = [batch size, src sent len]
 
-        pos = torch.arange(0, trg.shape[1]).unsqueeze(0).repeat(trg.shape[0], 1).to(self.device)
+        pos = torch.arange(0, trg.shape[1]).unsqueeze(0).repeat(trg.shape[0], 1).type(torch.LongTensor).to(self.device)
 
-        trg = self.do((self.tok_embedding(trg) * self.scale) + self.pos_embedding(pos))
+        tok_emb = self.tok_embedding(trg)
+        pos_emb = self.pos_embedding(pos)
+        #print("pos_emb", pos_emb.shape)
+
+        trg = self.do((tok_emb * self.scale) + pos_emb)
+        #trg = self.do((tok_emb * self.scale))
+
+        #print("trg.shape", trg.shape)
 
         #trg = [batch size, trg sent len, hid dim]
 

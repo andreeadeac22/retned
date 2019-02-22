@@ -18,7 +18,7 @@ import math
 import os
 import time
 
-class EncoderLayer(nn.Module):
+class AttnEncoderLayer(nn.Module):
     def __init__(self, hid_dim, n_heads, pf_dim, self_attention, positionwise_feedforward, dropout, device):
         super().__init__()
 

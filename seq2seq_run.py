@@ -248,6 +248,8 @@ def main():
     valid_losses = []
     train_losses = []
 
+    times = []
+
 
     for epoch in range(N_EPOCHS):
         start_time = time.time()
@@ -270,6 +272,8 @@ def main():
         if valid_loss < best_valid_loss:
             best_valid_loss = valid_loss
             torch.save(model.state_dict(), MODEL_SAVE_PATH)
+
+        times += [end_time - start_time]
         print('| Epoch: {0:3d} | Time: {1:5d}m {2:5d}s| Train Loss: {3:.3f} | Train PPL: {4:7.3f} | Val. Loss: {5:.3f} | Val. PPL: {6:7.3f} |'.format(epoch+1, epoch_mins, epoch_secs, train_loss, math.exp(train_loss), valid_loss, math.exp(valid_loss)))
 
 
@@ -283,10 +287,21 @@ def main():
     plt.legend()
     plt.savefig("loss_epochs")
 
+
+    with open("rnn_train_losses.pickle", 'wb') as f:
+        pickle.dump(train_losses, f)
+
+    with open("rnn_valid_losses.pickle", 'wb') as g:
+        pickle.dump(valid_losses, g)
+
+    with open("rnn_times.pickle", 'wb') as h:
+        pickle.dump(times, h)
+
     model.load_state_dict(torch.load(MODEL_SAVE_PATH))
     #test_loss, enc_test_vect, test_losses = evaluate(model, test_data, criterion)
     test_loss, enc_test_vect = evaluate(model, test_data, criterion)
     print('| Test Loss: {0:.3f} | Test PPL: {1:7.3f} |'.format(test_loss, math.exp(test_loss)))
+
 
     ann = create_annoy_index("RNNEncRNNDec", enc_train_vect)
     #ann = AnnoyIndex(train_data.shape[1])

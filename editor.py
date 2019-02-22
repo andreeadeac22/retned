@@ -38,6 +38,9 @@ class Editor(nn.Module):
 
         src_mask, trg_mask = self.make_masks(src, trg)
 
+        #print("src.shape", src.shape)
+        #print("trg.shape", trg.shape)
+
         enc_src = self.encoder(src, src_mask)
 
         #enc_src = [batch size, src sent len, hid dim]
