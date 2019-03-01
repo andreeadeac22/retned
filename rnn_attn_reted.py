@@ -46,6 +46,9 @@ from RNNEncoder import *
 from RNNDecoder import *
 from Seq2Seq import *
 
+import os
+
+SAVE_DIR = 'models'
 
 
 def ret_train(model, train_data, optimizer, criterion, clip):
@@ -122,17 +125,9 @@ def ed_train(model, train_data, optimizer, criterion, clip):
 
             trg = batch[:, max_comment_len:max_comment_len+max_code_len] # y
 
-
-            print(" x ", x.shape)
-            print(" xprime ", xprime.shape)
-            print(" yprime ", yprime.shape)
-            print(" trg ", trg.shape)
-
             optimizer.zero_grad()
             output = model(x, xprime, yprime, trg)
             # output shape is code_len, batch, trg_vocab_size
-            print("ed train output ", output.shape)
-            print("ed train trg ", trg.shape)
 
             output = torch.reshape(output, (batch_size*max_code_len, trg_vocab_size))
             trg = torch.reshape(trg, (batch_size*max_code_len,))
@@ -205,7 +200,8 @@ def ed_evaluate(model, valid_data, criterion):
         model.cuda()
         valid_data = valid_data.cuda()
 
-    print("valid_data ", valid_data.shape)
+    ref_code = valid_data[:, max_comment_len:max_comment_len+max_code_len]
+    candidate_code = torch.zeros_like(ref_code)
 
     with torch.no_grad():
         batch_num = 0
@@ -231,13 +227,16 @@ def ed_evaluate(model, valid_data, criterion):
                 #trg = [trg sent len, batch size]
                 #output = [trg sent len, batch size, output dim]
 
+                for cpj in range(batch_size):
+                    candidate_code[j+cpj] = torch.argmax(output[j+cpj], dim=1)
+
                 output = torch.reshape(output, (batch_size*max_code_len, trg_vocab_size))
                 trg = torch.reshape(trg, (batch_size*max_code_len,))
 
                 loss = criterion(output, trg)
                 epoch_loss += loss.item()
                 print("Batch: {0:3d} | Loss: {1:.3f}".format(batch_num, loss.item()))
-    return epoch_loss / batch_num, output
+    return epoch_loss / batch_num, candidate_code
 
 
 def count_parameters(model):
@@ -255,12 +254,12 @@ def plot_loss(filename, train_losses, valid_losses):
     plt.title("Loss vs Epochs")
     plt.xlabel("Training Epochs")
     plt.ylabel("Loss")
-    print("train_losses", train_losses)
+    #print("train_losses", train_losses)
     plt.plot(range(1,N_EPOCHS+1),train_losses,label="Train")
     plt.plot(range(1,N_EPOCHS+1),valid_losses,label="Validation")
 
     plt.legend()
-    plt.savefig("results/loss_epochs")
+    plt.savefig(filename)
 
 
 def create_annoy_index(fn, latent_space_vectors, num_trees=30):
@@ -284,11 +283,11 @@ def train_valid_model(filename, which_train, which_evaluate, model, train_data, 
     train_losses = []
     times = []
 
-    for epoch in range(1):
+    for epoch in range(N_EPOCHS):
         start_time = time.time()
 
         train_loss, enc_train_vect = which_train(model, train_data, optimizer, criterion, CLIP)
-        valid_loss, enc_valid_vect= which_evaluate(model, valid_data, criterion)
+        valid_loss, enc_valid_vect_candidates = which_evaluate(model, valid_data, criterion)
         train_losses += [train_loss]
         valid_losses += [valid_loss]
 
@@ -296,28 +295,30 @@ def train_valid_model(filename, which_train, which_evaluate, model, train_data, 
         epoch_mins, epoch_secs = epoch_time(start_time, end_time)
         if valid_loss < best_valid_loss:
             best_valid_loss = valid_loss
+            MODEL_SAVE_PATH = os.path.join(SAVE_DIR, filename + '_model.pt')
             torch.save(model.state_dict(), MODEL_SAVE_PATH)
 
         times += [end_time - start_time]
         print('| Epoch: {0:3d} | Time: {1:5d}m {2:5d}s| Train Loss: {3:.3f} | Train PPL: {4:7.3f} | Val. Loss: {5:.3f} | Val. PPL: {6:7.3f} |'.format(epoch+1, epoch_mins, epoch_secs, train_loss, math.exp(train_loss), valid_loss, math.exp(valid_loss)))
 
-    with open("results/ret_attn_train_losses.pickle", 'wb') as f:
+    with open("results/" + filename + "_train_losses.pickle", 'wb') as f:
         pickle.dump(train_losses, f)
-    with open("results/ret_attn_valid_losses.pickle", 'wb') as g:
+    with open("results/" + filename + "_valid_losses.pickle", 'wb') as g:
         pickle.dump(valid_losses, g)
-    with open("results/ret_attn_times.pickle", 'wb') as h:
+    with open("results/" + filename + "_attn_times.pickle", 'wb') as h:
         pickle.dump(times, h)
-    #plot_loss(filename = "results/ret_losses", train_losses=train_losses, valid_losses=valid_losses)
-    return enc_train_vect, enc_valid_vect
+    plot_loss(filename = "results/" + filename + "_losses", train_losses=train_losses, valid_losses=valid_losses)
+    return enc_train_vect, enc_valid_vect_candidates
 
 
 
 def test_model(filename, which_evaluate, model, test_data, criterion):
+    MODEL_SAVE_PATH = os.path.join(SAVE_DIR, filename + '_model.pt')
     model.load_state_dict(torch.load(MODEL_SAVE_PATH))
     #test_loss, enc_test_vect, test_losses = evaluate(model, test_data, criterion)
-    test_loss, enc_test_vect = which_evaluate(model, test_data, criterion)
+    test_loss, enc_test_vect_candidates = which_evaluate(model, test_data, criterion)
     print('| Test Loss: {0:.3f} | Test PPL: {1:7.3f} |'.format(test_loss, math.exp(test_loss)))
-    return enc_test_vect
+    return enc_test_vect_candidates
 
 
 def main():
@@ -386,7 +387,7 @@ def main():
         sim_train_data[training_sample_id] = train_data[sim_vect_id]
 
     new_train_data = torch.cat((train_data, sim_train_data), dim=1)
-    print("new_train_data ", new_train_data.shape)
+    #print("new_train_data ", new_train_data.shape)
 
     for valid_sample_id in range(valid_data.shape[0]):
         valid_sample_comment = valid_data[valid_sample_id][:max_comment_len]
@@ -439,11 +440,38 @@ def main():
     ed_optimizer = optim.Adam(ed_model.parameters())
     ed_criterion = nn.CrossEntropyLoss()
 
-    output_train_vect, output_valid_vect = train_valid_model(filename= "ed", which_train=ed_train, which_evaluate=ed_evaluate, model=ed_model, train_data=new_train_data, valid_data=new_valid_data, optimizer=ed_optimizer, criterion=ed_criterion)
-    print("Test model")
-    output_test_vect = test_model(filename="ed", which_evaluate=ed_evaluate, model=ed_model, test_data=new_test_data, criterion=ed_criterion)
+    output_train_vect, output_valid_vect_candidates = train_valid_model(filename= "ed", which_train=ed_train, which_evaluate=ed_evaluate, model=ed_model, train_data=new_train_data, valid_data=new_valid_data, optimizer=ed_optimizer, criterion=ed_criterion)
+    #print("Test model")
+    output_test_vect_candidates = test_model(filename="ed", which_evaluate=ed_evaluate, model=ed_model, test_data=new_test_data, criterion=ed_criterion)
+    output_test_vect_reference = test_data[:, max_comment_len:]
+
+    token_dict = pickle.load(open("codevocab.pickle", "rb"))
 
 
+    all_refs = []
+    all_cands = []
+    all_bleu_scores = []
+    for j in range(test_data.shape[0]):
+        ref = []
+        cand = []
+        for i in range(max_code_len):
+            ref_el = output_test_vect_reference[j][i].item()
+            cand_el = output_test_vect_candidates[j][i].item()
+            if ref_el > 0:
+                if ref_el in token_dict:
+                    ref += [token_dict[ref_el]]
+                if cand_el in token_dict:
+                    cand += [token_dict[cand_el]]
+        bleu = sentence_bleu([ref], cand)
+        all_bleu_scores += [bleu]
+        all_refs += [ref]
+        all_cands += [cand]
+
+    bleu_eval = {}
+    bleu_eval["scores"] = all_bleu_scores
+    bleu_eval["references"] = all_refs
+    bleu_eval["candidates"] = all_cands
+    pickle.dump(bleu_eval, open("results/bleu_evaluation_results.pickle", "wb"))
 
 if __name__== "__main__":
     main()

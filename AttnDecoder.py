@@ -44,6 +44,7 @@ class AttnDecoder(nn.Module):
         self.do = nn.Dropout(dropout)
 
         self.scale = torch.sqrt(torch.FloatTensor([hid_dim])).to(device)
+        self.softmax = nn.Softmax()
 
     def forward(self, trg, src, trg_mask, src_mask):
 
@@ -68,4 +69,5 @@ class AttnDecoder(nn.Module):
         for layer in self.layers:
             trg = layer(trg, src, trg_mask, src_mask)
 
-        return self.fc(trg)
+        output_trg = self.fc(trg)
+        return self.softmax(output_trg)

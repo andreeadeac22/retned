@@ -20,11 +20,9 @@ n_heads = 2
 pf_dim = 32 # was 2048?
 dropout = 0.1
 
-BATCH_SIZE = 16 
+BATCH_SIZE = 16
 
-N_EPOCHS = 20
+N_EPOCHS = 1
 
-SAVE_DIR = 'models'
-MODEL_SAVE_PATH = os.path.join(SAVE_DIR, 'reted_model.pt')
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print("cuda_device is ", device)

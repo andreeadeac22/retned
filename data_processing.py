@@ -302,8 +302,8 @@ def build_inverse_comment_dict():
 
 
 def split_data():
-    #build_vocabs()
-    #build_inverse_comment_dict()
+    build_vocabs()
+    build_inverse_comment_dict()
 
     dataset = pickle.load(open("dataset.pickle", "rb"))
 
