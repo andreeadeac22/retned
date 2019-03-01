@@ -197,21 +197,74 @@ def epoch_time(start_time, end_time):
     return elapsed_mins, elapsed_secs
 
 
+def plot_loss(train_losses, valid_losses):
+    plt.title("Loss vs Epochs")
+    plt.xlabel("Training Epochs")
+    plt.ylabel("Loss")
+    print("train_losses", train_losses)
+    plt.plot(range(1,N_EPOCHS+1),train_losses,label="Train")
+    plt.plot(range(1,N_EPOCHS+1),valid_losses,label="Validation")
+
+    plt.legend()
+    plt.savefig("results/loss_epochs")
+
+
 def create_annoy_index(fn, latent_space_vectors, num_trees=30):
     # Mapping comment to annoy id, so that we can then find similar comments easily
     # size is number of training samples -- this changes for train/valid/test! how does this influence
     # num_trees is a hyperparameter
     fn_annoy = fn + '.annoy'
-
     ann = AnnoyIndex(latent_space_vectors.shape[1]) #HID_DIM
     for i in range(latent_space_vectors.shape[0]):
         ann.add_item(i, latent_space_vectors[i])
 
     ann.build(num_trees)
     ann.save(fn_annoy)
-
     return ann
 
+
+def train_valid_model(model, train_data, valid_data, optimizer, criterion):
+    best_valid_loss = float('inf')
+
+    valid_losses = []
+    train_losses = []
+    times = []
+
+    for epoch in range(N_EPOCHS):
+        start_time = time.time()
+
+        train_loss, enc_train_vect = train(model, train_data, optimizer, criterion, CLIP)
+        valid_loss, enc_valid_vect= evaluate(model, valid_data, criterion)
+        train_losses += [train_loss]
+        valid_losses += [valid_loss]
+
+        end_time = time.time()
+        epoch_mins, epoch_secs = epoch_time(start_time, end_time)
+        if valid_loss < best_valid_loss:
+            best_valid_loss = valid_loss
+            torch.save(model.state_dict(), MODEL_SAVE_PATH)
+
+        times += [end_time - start_time]
+        print('| Epoch: {0:3d} | Time: {1:5d}m {2:5d}s| Train Loss: {3:.3f} | Train PPL: {4:7.3f} | Val. Loss: {5:.3f} | Val. PPL: {6:7.3f} |'.format(epoch+1, epoch_mins, epoch_secs, train_loss, math.exp(train_loss), valid_loss, math.exp(valid_loss)))
+
+    with open("results/rnn_train_losses.pickle", 'wb') as f:
+        pickle.dump(train_losses, f)
+    with open("results/rnn_valid_losses.pickle", 'wb') as g:
+        pickle.dump(valid_losses, g)
+    with open("results/rnn_times.pickle", 'wb') as h:
+        pickle.dump(times, h)
+    plot_loss(train_losses, valid_losses)
+
+    return enc_train_vect, enc_valid_vect
+
+
+
+def test_model(model, test_data, criterion):
+    model.load_state_dict(torch.load(MODEL_SAVE_PATH))
+    #test_loss, enc_test_vect, test_losses = evaluate(model, test_data, criterion)
+    test_loss, enc_test_vect = evaluate(model, test_data, criterion)
+    print('| Test Loss: {0:.3f} | Test PPL: {1:7.3f} |'.format(test_loss, math.exp(test_loss)))
+    return enc_test_vect
 
 
 def main():
@@ -240,68 +293,11 @@ def main():
     optimizer = optim.Adam(model.parameters())
     criterion = nn.CrossEntropyLoss()
 
-    best_valid_loss = float('inf')
-
     if not os.path.isdir('models'):
         os.makedirs('models')
 
-    valid_losses = []
-    train_losses = []
-
-    times = []
-
-
-    for epoch in range(N_EPOCHS):
-        start_time = time.time()
-
-        #train_loss, enc_train_vect, train_losses = train(model, train_data, optimizer, criterion, CLIP)
-        #valid_loss, enc_valid_vect, validation_losses = evaluate(model, valid_data, criterion)
-
-        train_loss, enc_train_vect = train(model, train_data, optimizer, criterion, CLIP)
-        valid_loss, enc_valid_vect= evaluate(model, valid_data, criterion)
-
-        train_losses += [train_loss]
-        valid_losses += [valid_loss]
-
-
-        #print("enc_train_vect.shape", enc_train_vect.shape)
-        #print("enc_valid_vect.shape", enc_valid_vect.shape)
-
-        end_time = time.time()
-        epoch_mins, epoch_secs = epoch_time(start_time, end_time)
-        if valid_loss < best_valid_loss:
-            best_valid_loss = valid_loss
-            torch.save(model.state_dict(), MODEL_SAVE_PATH)
-
-        times += [end_time - start_time]
-        print('| Epoch: {0:3d} | Time: {1:5d}m {2:5d}s| Train Loss: {3:.3f} | Train PPL: {4:7.3f} | Val. Loss: {5:.3f} | Val. PPL: {6:7.3f} |'.format(epoch+1, epoch_mins, epoch_secs, train_loss, math.exp(train_loss), valid_loss, math.exp(valid_loss)))
-
-
-    plt.title("Loss vs Epochs")
-    plt.xlabel("Training Epochs")
-    plt.ylabel("Loss")
-    print("train_losses", train_losses)
-    plt.plot(range(1,N_EPOCHS+1),train_losses,label="Train")
-    plt.plot(range(1,N_EPOCHS+1),valid_losses,label="Validation")
-
-    plt.legend()
-    plt.savefig("loss_epochs")
-
-
-    with open("rnn_train_losses.pickle", 'wb') as f:
-        pickle.dump(train_losses, f)
-
-    with open("rnn_valid_losses.pickle", 'wb') as g:
-        pickle.dump(valid_losses, g)
-
-    with open("rnn_times.pickle", 'wb') as h:
-        pickle.dump(times, h)
-
-    model.load_state_dict(torch.load(MODEL_SAVE_PATH))
-    #test_loss, enc_test_vect, test_losses = evaluate(model, test_data, criterion)
-    test_loss, enc_test_vect = evaluate(model, test_data, criterion)
-    print('| Test Loss: {0:.3f} | Test PPL: {1:7.3f} |'.format(test_loss, math.exp(test_loss)))
-
+    enc_train_vect, enc_valid_vect = train_valid_model(model=model, train_data=train_data, valid_data=valid_data, optimizer=optimizer, criterion=criterion)
+    enc_test_vect = test_model(model=model, test_data=test_data, criterion=criterion)
 
     ann = create_annoy_index("RNNEncRNNDec", enc_train_vect)
     #ann = AnnoyIndex(train_data.shape[1])
@@ -326,6 +322,7 @@ def main():
     annoy_vect = ann.get_item_vector(0)
 
     for id in ann.get_nns_by_vector(annoy_vect, 5):
+
         res = train_data[id]
         res_comment = res[:max_comment_len]
         #print("res_comment ", res_comment)
@@ -334,6 +331,7 @@ def main():
         res_collapsed = collapse_list2string(res_comment_wordlist, word2idcommentvocab_dict)
         #print("res_collapsed ", res_collapsed)
         print("X' comment", wordlist2comment_dict[res_collapsed])
+
 
 
 if __name__== "__main__":

@@ -1,3 +1,4 @@
+
 from __future__ import print_function
 
 import numpy as np
@@ -30,21 +31,18 @@ import time
 from annoy import AnnoyIndex
 
 from data_processing import *
-from constants import *
+from reted_constants import *
 from RNNEncoder import *
 from RNNDecoder import *
 from Seq2Seq import *
 
 
-def train(model, train_data, optimizer, criterion, clip):
+def ret_train(model, train_data, optimizer, criterion, clip):
     model.train()
     epoch_loss = 0
 
     batch_num = 0
     encoded_train_data = torch.zeros(train_data.shape[0], HID_DIM)
-    #print("encoded_train_data.shape", encoded_train_data.shape)
-
-    #train_losses = []
 
     if torch.cuda.is_available():
         model.cuda()
@@ -81,39 +79,80 @@ def train(model, train_data, optimizer, criterion, clip):
 
             encoded = encoded.squeeze(0)
 
-            #print("output.shape ", output.shape)
-            #print("encoded.shape ", encoded.shape)
 
             for cpj in range(encoded.shape[0]):
                 encoded_train_data[j+cpj] = encoded[cpj]
 
-            #encoded_train_data[j:j+min(train_data.shape[0], j + batch_size),:] = encoded
-
-            #trg = [trg sent len, batch size]
-            #output = [trg sent len, batch size, output dim]
-
-            #output = torch.transpose(output, 0, 1)
-            #onehot_trg = torch.transpose(onehot_trg, 0, 1)
-
             output = torch.reshape(output, (batch_size*max_code_len, trg_vocab_size))
             trg = torch.reshape(trg, (batch_size*max_code_len,))
 
-            #print("onehot_trg.shape", trg.shape)
-            #print("output.shape", output.shape)
-
             loss = criterion(output, trg)
 
-            #train_losses += [loss.item()]
-
-            #print("Train loss", loss.item())
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
             optimizer.step()
             epoch_loss += loss.item()
             print("Batch: {0:3d} | Loss: {1:.3f}".format(batch_num, loss.item()))
-    #return epoch_loss / batch_num, encoded_train_data, train_losses
     return epoch_loss / batch_num, encoded_train_data
 
+
+def ed_train(model, train_data, sim_train_data, optimizer, criterion, clip):
+    model.train()
+    epoch_loss = 0
+
+    batch_num = 0
+    encoded_train_data = torch.zeros(train_data.shape[0], HID_DIM)
+
+    if torch.cuda.is_available():
+        model.cuda()
+        train_data = train_data.cuda()
+        encoded_train_data = encoded_train_data.cuda()
+
+    for j in range(0, train_data.shape[0], batch_size): #TODO: replace batch_size with train_data.shape[0]
+        if j+ batch_size < train_data.shape[0]:
+            batch_num +=1
+            interval = [x for x in range(j, min(train_data.shape[0], j + batch_size))]
+            interval = torch.LongTensor(interval)
+            if torch.cuda.is_available():
+                interval = interval.cuda()
+            batch = Variable(index_select(train_data, 0, interval))
+            src = batch[:, :max_comment_len]
+            trg = batch[:, max_comment_len+1:]
+
+            onehot_trg = torch.FloatTensor(batch_size, max_code_len, trg_vocab_size)
+            if torch.cuda.is_available():
+                onehot_trg = onehot_trg.cuda()
+
+            for i in range(trg.shape[0]):
+                for k in range(max_code_len):
+                    if trg[i][k] > 0:
+                        onehot_trg[i][k][trg[i][k]] = 1
+
+            src = torch.transpose(src, 0, 1)
+            trg = torch.transpose(trg, 0, 1)
+            onehot_trg = torch.transpose(onehot_trg, 0, 1)
+
+            optimizer.zero_grad()
+            output, encoded = model(src, trg)
+            # output shape is code_len, batch, trg_vocab_size
+
+            encoded = encoded.squeeze(0)
+
+
+            for cpj in range(encoded.shape[0]):
+                encoded_train_data[j+cpj] = encoded[cpj]
+
+            output = torch.reshape(output, (batch_size*max_code_len, trg_vocab_size))
+            trg = torch.reshape(trg, (batch_size*max_code_len,))
+
+            loss = criterion(output, trg)
+
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+            optimizer.step()
+            epoch_loss += loss.item()
+            print("Batch: {0:3d} | Loss: {1:.3f}".format(batch_num, loss.item()))
+    return epoch_loss / batch_num, encoded_train_data
 
 
 def evaluate(model, valid_data, criterion):
@@ -197,21 +236,73 @@ def epoch_time(start_time, end_time):
     return elapsed_mins, elapsed_secs
 
 
+def plot_loss(train_losses, valid_losses):
+    plt.title("Loss vs Epochs")
+    plt.xlabel("Training Epochs")
+    plt.ylabel("Loss")
+    print("train_losses", train_losses)
+    plt.plot(range(1,N_EPOCHS+1),train_losses,label="Train")
+    plt.plot(range(1,N_EPOCHS+1),valid_losses,label="Validation")
+
+    plt.legend()
+    plt.savefig("results/loss_epochs")
+
+
 def create_annoy_index(fn, latent_space_vectors, num_trees=30):
     # Mapping comment to annoy id, so that we can then find similar comments easily
     # size is number of training samples -- this changes for train/valid/test! how does this influence
     # num_trees is a hyperparameter
     fn_annoy = fn + '.annoy'
-
     ann = AnnoyIndex(latent_space_vectors.shape[1]) #HID_DIM
     for i in range(latent_space_vectors.shape[0]):
         ann.add_item(i, latent_space_vectors[i])
 
     ann.build(num_trees)
     ann.save(fn_annoy)
-
     return ann
 
+
+def train_valid_model(filename, which_train, which_evaluate, model, train_data, valid_data, optimizer, criterion):
+    best_valid_loss = float('inf')
+
+    valid_losses = []
+    train_losses = []
+    times = []
+
+    for epoch in range(N_EPOCHS):
+        start_time = time.time()
+
+        train_loss, enc_train_vect = which_train(model, train_data, optimizer, criterion, CLIP)
+        valid_loss, enc_valid_vect= which_evaluate(model, valid_data, criterion)
+        train_losses += [train_loss]
+        valid_losses += [valid_loss]
+
+        end_time = time.time()
+        epoch_mins, epoch_secs = epoch_time(start_time, end_time)
+        if valid_loss < best_valid_loss:
+            best_valid_loss = valid_loss
+            torch.save(model.state_dict(), MODEL_SAVE_PATH)
+
+        times += [end_time - start_time]
+        print('| Epoch: {0:3d} | Time: {1:5d}m {2:5d}s| Train Loss: {3:.3f} | Train PPL: {4:7.3f} | Val. Loss: {5:.3f} | Val. PPL: {6:7.3f} |'.format(epoch+1, epoch_mins, epoch_secs, train_loss, math.exp(train_loss), valid_loss, math.exp(valid_loss)))
+
+    with open("results/ret_attn_train_losses.pickle", 'wb') as f:
+        pickle.dump(train_losses, f)
+    with open("results/ret_attn_valid_losses.pickle", 'wb') as g:
+        pickle.dump(valid_losses, g)
+    with open("results/ret_attn_times.pickle", 'wb') as h:
+        pickle.dump(times, h)
+    plot_loss(file_name = "results/ret_losses", train_losses, valid_losses)
+    return enc_train_vect, enc_valid_vect
+
+
+
+def test_model(filename, which_evaluate, model, test_data, criterion):
+    model.load_state_dict(torch.load(MODEL_SAVE_PATH))
+    #test_loss, enc_test_vect, test_losses = evaluate(model, test_data, criterion)
+    test_loss, enc_test_vect = which_evaluate(model, test_data, criterion)
+    print('| Test Loss: {0:.3f} | Test PPL: {1:7.3f} |'.format(test_loss, math.exp(test_loss)))
+    return enc_test_vect
 
 
 def main():
@@ -229,243 +320,91 @@ def main():
 
     train_data, valid_data, test_data = split_data()
 
-    enc = RNNEncoder(INPUT_DIM, ENC_EMB_DIM, HID_DIM, N_LAYERS, ENC_DROPOUT)
-    dec = RNNDecoder(OUTPUT_DIM, DEC_EMB_DIM, HID_DIM, N_LAYERS, DEC_DROPOUT)
 
-    model = Seq2Seq(enc, dec, cuda_device).to(cuda_device)
+    ############################### RETRIEVER #################################
+
+    ret_enc = AttnEncoder(input_dim, hid_dim, n_layers, n_heads, pf_dim, AttnEncoderLayer, SelfAttention, PositionwiseFeedforward, dropout, device)
+    ret_dec = AttnDecoder(output_dim, hid_dim, n_layers, n_heads, pf_dim, AttnDecoderLayer, SelfAttention, PositionwiseFeedforward, dropout, device)
+
+    ret_pad_idx = 0
+    ret_model = Editor(ret_enc, ret_dec, ret_pad_idx, device).to(device)
 
 
-    print('The model has {0:9d} trainable parameters'.format(count_parameters(model)))
+    print('The model has {0:9d} trainable parameters'.format(count_parameters(ret_model)))
 
-    optimizer = optim.Adam(model.parameters())
-    criterion = nn.CrossEntropyLoss()
-
-    best_valid_loss = float('inf')
+    ret_optimizer = optim.Adam(ret_model.parameters())
+    ret_criterion = nn.CrossEntropyLoss()
 
     if not os.path.isdir('models'):
         os.makedirs('models')
 
-    valid_losses = []
-    train_losses = []
-
-    times = []
+    enc_train_vect, enc_valid_vect = train_valid_model(filename="ret", which_train=ret_train, which_evaluate=ret_evaluate, model=ret_model, train_data=train_data, valid_data=valid_data, optimizer=ret_optimizer, criterion=ret_criterion)
+    enc_test_vect = test_model(filename="ret", which_evaluate= ret_evaluate, model=ret_model, test_data=test_data, criterion=ret_criterion)
 
 
-    for epoch in range(N_EPOCHS):
-        start_time = time.time()
-
-        #train_loss, enc_train_vect, train_losses = train(model, train_data, optimizer, criterion, CLIP)
-        #valid_loss, enc_valid_vect, validation_losses = evaluate(model, valid_data, criterion)
-
-        train_loss, enc_train_vect = train(model, train_data, optimizer, criterion, CLIP)
-        valid_loss, enc_valid_vect= evaluate(model, valid_data, criterion)
-
-        train_losses += [train_loss]
-        valid_losses += [valid_loss]
+    ######################## NEAREST NEIGHBOUR #################################
 
 
-        #print("enc_train_vect.shape", enc_train_vect.shape)
-        #print("enc_valid_vect.shape", enc_valid_vect.shape)
-
-        end_time = time.time()
-        epoch_mins, epoch_secs = epoch_time(start_time, end_time)
-        if valid_loss < best_valid_loss:
-            best_valid_loss = valid_loss
-            torch.save(model.state_dict(), MODEL_SAVE_PATH)
-
-        times += [end_time - start_time]
-        print('| Epoch: {0:3d} | Time: {1:5d}m {2:5d}s| Train Loss: {3:.3f} | Train PPL: {4:7.3f} | Val. Loss: {5:.3f} | Val. PPL: {6:7.3f} |'.format(epoch+1, epoch_mins, epoch_secs, train_loss, math.exp(train_loss), valid_loss, math.exp(valid_loss)))
-
-
-    plt.title("Loss vs Epochs")
-    plt.xlabel("Training Epochs")
-    plt.ylabel("Loss")
-    print("train_losses", train_losses)
-    plt.plot(range(1,N_EPOCHS+1),train_losses,label="Train")
-    plt.plot(range(1,N_EPOCHS+1),valid_losses,label="Validation")
-
-    plt.legend()
-    plt.savefig("loss_epochs")
-
-
-    with open("rnn_train_losses.pickle", 'wb') as f:
-        pickle.dump(train_losses, f)
-
-    with open("rnn_valid_losses.pickle", 'wb') as g:
-        pickle.dump(valid_losses, g)
-
-    with open("rnn_times.pickle", 'wb') as h:
-        pickle.dump(times, h)
-
-    model.load_state_dict(torch.load(MODEL_SAVE_PATH))
-    #test_loss, enc_test_vect, test_losses = evaluate(model, test_data, criterion)
-    test_loss, enc_test_vect = evaluate(model, test_data, criterion)
-    print('| Test Loss: {0:.3f} | Test PPL: {1:7.3f} |'.format(test_loss, math.exp(test_loss)))
-
-
-    ann = create_annoy_index("RNNEncRNNDec", enc_train_vect)
-    #ann = AnnoyIndex(train_data.shape[1])
-    #ann.load("RNNEncRNNDec.annoy")
+    ann = create_annoy_index("AttnEncAttnDec", enc_train_vect)
 
     wordlist2comment_dict = pickle.load(open("wordlist2comment.pickle", "rb"))
     word2idcommentvocab_dict = pickle.load(open("word2idcommentvocab.pickle", "rb"))
 
-    training_sample = train_data[0]
-    training_sample_comment = training_sample[:max_comment_len]
-    training_sample_code = training_sample[max_comment_len+1:]
+    sim_train_data = torch.zeros_like(train_data)
+    sim_valid_data = torch.zeros_like(valid_data)
 
-    #print(training_sample_comment)
+    for training_sample_id in range(train_data.shape[0]):
+        training_sample_comment = train_data[training_sample_id][:max_comment_len]
+        training_sample_code = train_data[training_sample_id][max_comment_len+1:]
 
-    training_sample_wordlist = tensor2wordlist(training_sample_comment)
-    #print("training_sample_wordlist ", training_sample_wordlist)
-    collapsed = collapse_list2string(training_sample_wordlist, word2idcommentvocab_dict)
-    #print("collapsed ", collapsed)
-    print("Original x comment ", wordlist2comment_dict[collapsed])
+        annoy_vect = ann.get_item_vector(training_sample_id)
 
-    enc_train_vect_sample = enc_train_vect[0]
-    annoy_vect = ann.get_item_vector(0)
+        sim_vect_id = ann.get_nns_by_vector(annoy_vect, 1)
 
-    for id in ann.get_nns_by_vector(annoy_vect, 5):
-        res = train_data[id]
-        res_comment = res[:max_comment_len]
-        #print("res_comment ", res_comment)
-        res_comment_wordlist = tensor2wordlist(res_comment)
-        #print("res_comment_wordlist", res_comment_wordlist)
-        res_collapsed = collapse_list2string(res_comment_wordlist, word2idcommentvocab_dict)
-        #print("res_collapsed ", res_collapsed)
-        print("X' comment", wordlist2comment_dict[res_collapsed])
+        if sim_vect_id == training_sample_id:
+            print("Same id for training vect and similar vect")
+            exit(0)
+
+        sim_train_data[training_sample_id] = train_data[sim_vect_id]
+
+    for valid_sample_id in range(valid_data.shape[0]):
+        valid_sample_comment = valid_data[valid_sample_id][:max_comment_len]
+        valid_sample_code = valid_data[valid_sample_id][max_comment_len+1:]
+
+        annoy_vect = ann.get_item_vector(valid_sample_id)
+
+        sim_vect_id = ann.get_nns_by_vector(annoy_vect, 1)
+
+        if sim_vect_id == valid_sample_id:
+            print("Same id for training vect and similar vect")
+            exit(0)
+
+        sim_valid_data[valid_sample_id] = valid_data[sim_vect_id]
+
+    new_valid_data = torch.cat((valid_data, sim_valid_data), dim=1)
+
+    ############################### EDITOR #################################
 
 
-    for p in model.parameters():
+    ed_enc = AttnEncoder(input_dim, hid_dim, n_layers, n_heads, pf_dim, AttnEncoderLayer, SelfAttention, PositionwiseFeedforward, dropout, device)
+    ed_dec = AttnDecoder(output_dim, hid_dim, n_layers, n_heads, pf_dim, AttnDecoderLayer, SelfAttention, PositionwiseFeedforward, dropout, device)
+
+    ed_pad_idx = 0
+    ed_model = Editor(ed_enc, ed_dec, ed_pad_idx, device).to(device)
+
+
+    for p in ed_model.parameters():
         if p.dim() > 1:
             nn.init.xavier_uniform_(p)
 
+    print('The model has {0:9d} trainable parameters'.format(count_parameters(ed_model)))
 
-    print('The model has {0:9d} trainable parameters'.format(count_parameters(model)))
+    ed_optimizer = optim.Adam(ed_model.parameters())
+    ed_criterion = nn.CrossEntropyLoss()
 
-    #optimizer = NoamOpt(hid_dim, 1, 2000, torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
-    optimizer = optim.Adam(model.parameters())
+    output_train_vect, output_valid_vect = train_valid_model(filename= "ed", which_train=ed_train, which_evaluate=ed_evaluate, model=ed_model, train_data=new_train_data, valid_data=new_valid_data, optimizer=ed_optimizer, criterion=ed_criterion)
+    output_test_vect = test_model(filename="ed", which_evaluate=ed_evaluate, model=ed_model, test_data=test_data, criterion=ed_criterion)
 
-    criterion = nn.CrossEntropyLoss()
-
-    best_valid_loss = float('inf')
-
-    if not os.path.isdir('models'):
-        os.makedirs('models')
-
-    valid_losses = []
-    train_losses = []
-    times = []
-
-
-    for epoch in range(N_EPOCHS):
-        start_time = time.time()
-
-        #train_loss, enc_train_vect, train_losses = train(model, train_data, optimizer, criterion, CLIP)
-        #valid_loss, enc_valid_vect, validation_losses = evaluate(model, valid_data, criterion)
-
-        #train_loss, enc_train_vect = train(model, train_data, optimizer, criterion, CLIP)
-        #valid_loss, enc_valid_vect= evaluate(model, valid_data, criterion)
-
-        train_loss = train(model, train_data, optimizer, criterion, CLIP)
-        valid_loss = evaluate(model, valid_data, criterion)
-
-        train_losses += [train_loss]
-        valid_losses += [valid_loss]
-
-
-        #print("enc_train_vect.shape", enc_train_vect.shape)
-        #print("enc_valid_vect.shape", enc_valid_vect.shape)
-
-        end_time = time.time()
-        epoch_mins, epoch_secs = epoch_time(start_time, end_time)
-        if valid_loss < best_valid_loss:
-            best_valid_loss = valid_loss
-            torch.save(model.state_dict(), MODEL_SAVE_PATH)
-
-        times += [end_time - start_time]
-        print('| Epoch: {0:3d} | Time: {1:5d}m {2:5d}s| Train Loss: {3:.3f} | Train PPL: {4:7.3f} | Val. Loss: {5:.3f} | Val. PPL: {6:7.3f} |'.format(epoch+1, epoch_mins, epoch_secs, train_loss, math.exp(train_loss), valid_loss, math.exp(valid_loss)))
-
-    enc = AttnEncoder(input_dim, hid_dim, n_layers, n_heads, pf_dim, AttnEncoderLayer, SelfAttention, PositionwiseFeedforward, dropout, device)
-    dec = AttnDecoder(output_dim, hid_dim, n_layers, n_heads, pf_dim, AttnDecoderLayer, SelfAttention, PositionwiseFeedforward, dropout, device)
-
-    pad_idx = 0
-    model = Editor(enc, dec, pad_idx, device).to(device)
-
-    for p in model.parameters():
-        if p.dim() > 1:
-            nn.init.xavier_uniform_(p)
-
-
-    print('The model has {0:9d} trainable parameters'.format(count_parameters(model)))
-
-    #optimizer = NoamOpt(hid_dim, 1, 2000, torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
-    optimizer = optim.Adam(model.parameters())
-
-    criterion = nn.CrossEntropyLoss()
-
-    best_valid_loss = float('inf')
-
-    if not os.path.isdir('models'):
-        os.makedirs('models')
-
-    valid_losses = []
-    train_losses = []
-    times = []
-
-
-    for epoch in range(N_EPOCHS):
-        start_time = time.time()
-
-        #train_loss, enc_train_vect, train_losses = train(model, train_data, optimizer, criterion, CLIP)
-        #valid_loss, enc_valid_vect, validation_losses = evaluate(model, valid_data, criterion)
-
-        #train_loss, enc_train_vect = train(model, train_data, optimizer, criterion, CLIP)
-        #valid_loss, enc_valid_vect= evaluate(model, valid_data, criterion)
-
-        train_loss = train(model, train_data, optimizer, criterion, CLIP)
-        valid_loss = evaluate(model, valid_data, criterion)
-
-        train_losses += [train_loss]
-        valid_losses += [valid_loss]
-
-
-        #print("enc_train_vect.shape", enc_train_vect.shape)
-        #print("enc_valid_vect.shape", enc_valid_vect.shape)
-
-        end_time = time.time()
-        epoch_mins, epoch_secs = epoch_time(start_time, end_time)
-        if valid_loss < best_valid_loss:
-            best_valid_loss = valid_loss
-            torch.save(model.state_dict(), MODEL_SAVE_PATH)
-
-        times += [end_time - start_time]
-        print('| Epoch: {0:3d} | Time: {1:5d}m {2:5d}s| Train Loss: {3:.3f} | Train PPL: {4:7.3f} | Val. Loss: {5:.3f} | Val. PPL: {6:7.3f} |'.format(epoch+1, epoch_mins, epoch_secs, train_loss, math.exp(train_loss), valid_loss, math.exp(valid_loss)))
-
-
-    plt.title("Loss vs Epochs")
-    plt.xlabel("Training Epochs")
-    plt.ylabel("Loss")
-    print("train_losses", train_losses)
-    plt.plot(range(1,N_EPOCHS+1),train_losses,label="Train")
-    plt.plot(range(1,N_EPOCHS+1),valid_losses,label="Validation")
-
-    plt.legend()
-    plt.savefig("attn_loss_epochs")
-
-    with open("attn_train_losses.pickle", 'wb') as f:
-        pickle.dump(train_losses, f)
-
-    with open("attn_valid_losses.pickle", 'wb') as g:
-        pickle.dump(valid_losses, g)
-
-    with open("attn_times.pickle", 'wb') as h:
-        pickle.dump(times, h)
-
-    model.load_state_dict(torch.load(MODEL_SAVE_PATH))
-    #test_loss, enc_test_vect, test_losses = evaluate(model, test_data, criterion)
-    test_loss = evaluate(model, test_data, criterion)
-    print('| Test Loss: {0:.3f} | Test PPL: {1:7.3f} |'.format(test_loss, math.exp(test_loss)))
 
 
 if __name__== "__main__":
