@@ -60,7 +60,7 @@ def ret_train(model, train_data, optimizer, criterion, clip):
         train_data = train_data.cuda()
         encoded_train_data = encoded_train_data.cuda()
 
-    for j in range(0, train_data.shape[0], batch_size): #TODO: replace batch_size with train_data.shape[0]
+    for j in range(0, batch_size, batch_size): #TODO: replace batch_size with train_data.shape[0]
         if j+ batch_size < train_data.shape[0]:
             batch_num +=1
             interval = [x for x in range(j, min(train_data.shape[0], j + batch_size))]
@@ -69,7 +69,7 @@ def ret_train(model, train_data, optimizer, criterion, clip):
                 interval = interval.cuda()
             batch = Variable(index_select(train_data, 0, interval))
             src = batch[:, :max_comment_len]
-            trg = batch[:, max_comment_len+1:]
+            trg = batch[:, max_comment_len:]
 
             src = torch.transpose(src, 0, 1)
             trg = torch.transpose(trg, 0, 1)
@@ -96,7 +96,8 @@ def ret_train(model, train_data, optimizer, criterion, clip):
             print("Batch: {0:3d} | Loss: {1:.3f}".format(batch_num, loss.item()))
     return epoch_loss / batch_num, encoded_train_data
 
-def ed_train(model, train_data, sim_train_data, optimizer, criterion, clip):
+
+def ed_train(model, train_data, optimizer, criterion, clip):
     model.train()
     epoch_loss = 0
 
@@ -106,7 +107,7 @@ def ed_train(model, train_data, sim_train_data, optimizer, criterion, clip):
         model.cuda()
         train_data = train_data.cuda()
 
-    for j in range(0, train_data.shape[0], batch_size): #TODO: replace batch_size with train_data.shape[0]
+    for j in range(0, batch_size, batch_size): #TODO: replace batch_size with train_data.shape[0]
         if j+ batch_size < train_data.shape[0]:
             batch_num +=1
             interval = [x for x in range(j, min(train_data.shape[0], j + batch_size))]
@@ -114,25 +115,24 @@ def ed_train(model, train_data, sim_train_data, optimizer, criterion, clip):
             if torch.cuda.is_available():
                 interval = interval.cuda()
             batch = Variable(index_select(train_data, 0, interval))
+
             x= batch[:, :max_comment_len]
-            xprime = batch[:, max_comment_len+max_code_len+1 : max_comment_len*2+max_code_len]
-            yprime = batch[:, max_comment_len*2+max_code_len+1:]
+            xprime = batch[:, max_comment_len+max_code_len: max_comment_len*2+max_code_len]
+            yprime = batch[:, max_comment_len*2+max_code_len:]
 
-            trg = batch[:, max_comment_len+1:max_comment_len+max_code_len] # y
+            trg = batch[:, max_comment_len:max_comment_len+max_code_len] # y
 
 
-            src = torch.transpose(src, 0, 1)
-            trg = torch.transpose(trg, 0, 1)
+            print(" x ", x.shape)
+            print(" xprime ", xprime.shape)
+            print(" yprime ", yprime.shape)
+            print(" trg ", trg.shape)
 
             optimizer.zero_grad()
-            output, encoded = model(x, xprime, yprime, trg)
+            output = model(x, xprime, yprime, trg)
             # output shape is code_len, batch, trg_vocab_size
-
-            encoded = encoded.squeeze(0)
-
-
-            for cpj in range(encoded.shape[0]):
-                encoded_train_data[j+cpj] = encoded[cpj]
+            print("ed train output ", output.shape)
+            print("ed train trg ", trg.shape)
 
             output = torch.reshape(output, (batch_size*max_code_len, trg_vocab_size))
             trg = torch.reshape(trg, (batch_size*max_code_len,))
@@ -144,7 +144,7 @@ def ed_train(model, train_data, sim_train_data, optimizer, criterion, clip):
             optimizer.step()
             epoch_loss += loss.item()
             print("Batch: {0:3d} | Loss: {1:.3f}".format(batch_num, loss.item()))
-    return epoch_loss / batch_num, encoded_train_data
+    return epoch_loss / batch_num, output
 
 
 def ret_evaluate(model, valid_data, criterion):
@@ -161,7 +161,7 @@ def ret_evaluate(model, valid_data, criterion):
 
     with torch.no_grad():
         batch_num = 0
-        for j in range(0, valid_data.shape[0], batch_size):
+        for j in range(0, batch_size, batch_size):
             if j+ batch_size < valid_data.shape[0]:
                 batch_num +=1
                 interval = [x for x in range(j, min(valid_data.shape[0], j + batch_size))]
@@ -170,29 +170,17 @@ def ret_evaluate(model, valid_data, criterion):
                     interval = interval.cuda()
                 batch = Variable(index_select(valid_data, 0, interval))
                 src = batch[:, :max_comment_len]
-                trg = batch[:, max_comment_len+1:]
+                trg = batch[:, max_comment_len:]
 
-                onehot_trg = torch.FloatTensor(batch_size, max_code_len, trg_vocab_size)
-                if torch.cuda.is_available():
-                    onehot_trg = onehot_trg.cuda()
-
-                for i in range(trg.shape[0]):
-                    for k in range(max_code_len):
-                        if trg[i][k] > 0:
-                            onehot_trg[i][k][trg[i][k]] = 1
 
                 src = torch.transpose(src, 0, 1)
                 trg = torch.transpose(trg, 0, 1)
-                onehot_trg = torch.transpose(onehot_trg, 0, 1)
-
 
                 output, encoded = model(src, trg, 0)
                 # output shape is code_len, batch, trg_vocab_size
 
                 encoded = encoded.squeeze(0)
 
-                #print("output.shape ", output.shape)
-                #print("encoded.shape ", encoded.shape)
 
                 for cpj in range(encoded.shape[0]):
                     encoded_valid_data[j+cpj] = encoded[cpj]
@@ -203,15 +191,9 @@ def ret_evaluate(model, valid_data, criterion):
                 output = torch.reshape(output, (batch_size*max_code_len, trg_vocab_size))
                 trg = torch.reshape(trg, (batch_size*max_code_len,))
 
-                #output = torch.transpose(output, 0, 1)
-                #onehot_trg = torch.transpose(onehot_trg, 0, 1)
-
                 loss = criterion(output, trg)
-                #print("Valid loss", loss.item())
-                #validation_losses += [loss]
                 epoch_loss += loss.item()
                 print("Batch: {0:3d} | Loss: {1:.3f}".format(batch_num, loss.item()))
-    #return epoch_loss / batch_num, encoded_valid_data, validation_losses
     return epoch_loss / batch_num, encoded_valid_data
 
 
@@ -219,19 +201,15 @@ def ed_evaluate(model, valid_data, criterion):
     model.eval()
     epoch_loss = 0
 
-    encoded_valid_data = torch.zeros(valid_data.shape[0], HID_DIM)
-    #print("encoded_valid_data.shape", encoded_valid_data.shape)
-
     if torch.cuda.is_available():
         model.cuda()
         valid_data = valid_data.cuda()
-        encoded_valid_data = encoded_valid_data.cuda()
 
-    #validation_losses = []
+    print("valid_data ", valid_data.shape)
 
     with torch.no_grad():
         batch_num = 0
-        for j in range(0, valid_data.shape[0], batch_size):
+        for j in range(0, batch_size, batch_size):
             if j+ batch_size < valid_data.shape[0]:
                 batch_num +=1
                 interval = [x for x in range(j, min(valid_data.shape[0], j + batch_size))]
@@ -239,26 +217,16 @@ def ed_evaluate(model, valid_data, criterion):
                 if torch.cuda.is_available():
                     interval = interval.cuda()
                 batch = Variable(index_select(valid_data, 0, interval))
+
                 x= batch[:, :max_comment_len]
-                xprime = batch[:, max_comment_len+max_code_len+1 : max_comment_len*2+max_code_len]
-                yprime = batch[:, max_comment_len*2+max_code_len+1:]
-                trg = batch[:, max_comment_len+1:]
+                xprime = batch[:, max_comment_len+max_code_len: max_comment_len*2+max_code_len]
+                yprime = batch[:, max_comment_len*2+max_code_len:]
 
-                #src = torch.transpose(src, 0, 1)
-                trg = torch.transpose(trg, 0, 1)
-                onehot_trg = torch.transpose(onehot_trg, 0, 1)
+                trg = batch[:, max_comment_len:max_comment_len+max_code_len] # y
 
 
-                output, encoded = model(x, xprime, yprime, trg, 0)
+                output = model(x, xprime, yprime, trg)
                 # output shape is code_len, batch, trg_vocab_size
-
-                encoded = encoded.squeeze(0)
-
-                #print("output.shape ", output.shape)
-                #print("encoded.shape ", encoded.shape)
-
-                for cpj in range(encoded.shape[0]):
-                    encoded_valid_data[j+cpj] = encoded[cpj]
 
                 #trg = [trg sent len, batch size]
                 #output = [trg sent len, batch size, output dim]
@@ -266,16 +234,10 @@ def ed_evaluate(model, valid_data, criterion):
                 output = torch.reshape(output, (batch_size*max_code_len, trg_vocab_size))
                 trg = torch.reshape(trg, (batch_size*max_code_len,))
 
-                #output = torch.transpose(output, 0, 1)
-                #onehot_trg = torch.transpose(onehot_trg, 0, 1)
-
                 loss = criterion(output, trg)
-                #print("Valid loss", loss.item())
-                #validation_losses += [loss]
                 epoch_loss += loss.item()
                 print("Batch: {0:3d} | Loss: {1:.3f}".format(batch_num, loss.item()))
-    #return epoch_loss / batch_num, encoded_valid_data, validation_losses
-    return epoch_loss / batch_num, encoded_valid_data
+    return epoch_loss / batch_num, output
 
 
 def count_parameters(model):
@@ -397,21 +359,25 @@ def main():
     ######################## NEAREST NEIGHBOUR #################################
 
 
-    ann = create_annoy_index("AttnEncAttnDec", enc_train_vect)
+    train_ann = create_annoy_index("AttnEncAttnDecTrain", enc_train_vect)
+    valid_ann = create_annoy_index("AttnEncAttnDecValid", enc_valid_vect)
+    test_ann = create_annoy_index("AttnEncAttnDecTest", enc_test_vect)
+
 
     wordlist2comment_dict = pickle.load(open("wordlist2comment.pickle", "rb"))
     word2idcommentvocab_dict = pickle.load(open("word2idcommentvocab.pickle", "rb"))
 
     sim_train_data = torch.zeros_like(train_data)
     sim_valid_data = torch.zeros_like(valid_data)
+    sim_test_data = torch.zeros_like(test_data)
 
     for training_sample_id in range(train_data.shape[0]):
         training_sample_comment = train_data[training_sample_id][:max_comment_len]
         training_sample_code = train_data[training_sample_id][max_comment_len+1:]
 
-        annoy_vect = ann.get_item_vector(training_sample_id)
+        annoy_vect = train_ann.get_item_vector(training_sample_id)
 
-        sim_vect_id = ann.get_nns_by_vector(annoy_vect, 1)
+        sim_vect_id = train_ann.get_nns_by_vector(annoy_vect, 1)
 
         if sim_vect_id == training_sample_id:
             print("Same id for training vect and similar vect")
@@ -419,13 +385,16 @@ def main():
 
         sim_train_data[training_sample_id] = train_data[sim_vect_id]
 
+    new_train_data = torch.cat((train_data, sim_train_data), dim=1)
+    print("new_train_data ", new_train_data.shape)
+
     for valid_sample_id in range(valid_data.shape[0]):
         valid_sample_comment = valid_data[valid_sample_id][:max_comment_len]
         valid_sample_code = valid_data[valid_sample_id][max_comment_len+1:]
 
-        annoy_vect = ann.get_item_vector(valid_sample_id)
+        annoy_vect = valid_ann.get_item_vector(valid_sample_id)
 
-        sim_vect_id = ann.get_nns_by_vector(annoy_vect, 1)
+        sim_vect_id = valid_ann.get_nns_by_vector(annoy_vect, 1)
 
         if sim_vect_id == valid_sample_id:
             print("Same id for training vect and similar vect")
@@ -434,6 +403,22 @@ def main():
         sim_valid_data[valid_sample_id] = valid_data[sim_vect_id]
 
     new_valid_data = torch.cat((valid_data, sim_valid_data), dim=1)
+
+    for test_sample_id in range(test_data.shape[0]):
+        test_sample_comment = test_data[test_sample_id][:max_comment_len]
+        test_sample_code = test_data[test_sample_id][max_comment_len+1:]
+
+        annoy_vect = test_ann.get_item_vector(test_sample_id)
+
+        sim_vect_id = test_ann.get_nns_by_vector(annoy_vect, 1)
+
+        if sim_vect_id == test_sample_id:
+            print("Same id for training vect and similar vect")
+            exit(0)
+
+        sim_test_data[test_sample_id] = test_data[sim_vect_id]
+
+    new_test_data = torch.cat((test_data, sim_test_data), dim=1)
 
     ############################### EDITOR #################################
 
@@ -455,7 +440,8 @@ def main():
     ed_criterion = nn.CrossEntropyLoss()
 
     output_train_vect, output_valid_vect = train_valid_model(filename= "ed", which_train=ed_train, which_evaluate=ed_evaluate, model=ed_model, train_data=new_train_data, valid_data=new_valid_data, optimizer=ed_optimizer, criterion=ed_criterion)
-    output_test_vect = test_model(filename="ed", which_evaluate=ed_evaluate, model=ed_model, test_data=test_data, criterion=ed_criterion)
+    print("Test model")
+    output_test_vect = test_model(filename="ed", which_evaluate=ed_evaluate, model=ed_model, test_data=new_test_data, criterion=ed_criterion)
 
 
 

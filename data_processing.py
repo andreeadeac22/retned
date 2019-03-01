@@ -242,7 +242,7 @@ def build_vocabs():
     comment_code_file = open("commentcode.pickle", "rb")
     comment_code_dict = pickle.load(comment_code_file)
 
-    dataset = np.zeros((len(comment_code_dict), max_comment_len + max_code_len +1 ), dtype=int) # 150 is max_code_len
+    dataset = np.zeros((len(comment_code_dict), max_comment_len + max_code_len), dtype=int) # 150 is max_code_len
 
     comment2list_read = open("comment2list.pickle", "rb")
     comment2list_dict = pickle.load(comment2list_read)
@@ -296,7 +296,7 @@ def build_inverse_comment_dict():
 
         wordlist2comment_dict[wordlist] = comment
         print(wordlist, comment, file=wordlist2comment_file)
-    
+
 
     pickle.dump(wordlist2comment_dict, wordlist2comment)
 

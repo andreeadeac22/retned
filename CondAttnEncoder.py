@@ -36,7 +36,7 @@ class CondAttnEncoder(nn.Module):
 
         self.word_embedding = nn.Embedding(comment_input_dim, hid_dim)
         self.tok_embedding = nn.Embedding(code_input_dim, hid_dim)
-        self.pos_embedding = nn.Embedding(input_dim, hid_dim)
+        self.pos_embedding = nn.Embedding(2*comment_input_dim + code_input_dim, hid_dim)
 
         self.layers = nn.ModuleList([encoder_layer(hid_dim, n_heads, pf_dim, self_attention, positionwise_feedforward, dropout, device)
                                      for _ in range(n_layers)])
@@ -52,12 +52,9 @@ class CondAttnEncoder(nn.Module):
 
         src = torch.cat((src_x, src_xprime, src_yprime), dim=1)
 
-
-
         pos = torch.arange(0, src.shape[1]).unsqueeze(0).repeat(src.shape[0], 1).type(torch.LongTensor)
         if torch.cuda.is_available():
             pos = pos.cuda()
-
 
         tok_emb = self.tok_embedding(src_yprime)
         wordx_emb = self.word_embedding(src_x)

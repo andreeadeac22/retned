@@ -31,17 +31,16 @@ class Editor(nn.Module):
 
         return src_mask, trg_mask
 
-    def forward(self, src, trg):
+    def forward(self, src_x, src_xprime, src_yprime, trg):
 
         #src = [batch size, src sent len]
         #trg = [batch size, trg sent len]
 
+        src = torch.cat((src_x, src_xprime, src_yprime), dim=1)
+
         src_mask, trg_mask = self.make_masks(src, trg)
 
-        #print("src.shape", src.shape)
-        #print("trg.shape", trg.shape)
-
-        enc_src = self.encoder(src, src_mask)
+        enc_src = self.encoder(src_x, src_xprime, src_yprime, src_mask)
 
         #enc_src = [batch size, src sent len, hid dim]
 
