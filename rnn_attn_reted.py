@@ -89,7 +89,7 @@ def ret_train(model, train_data, optimizer, criterion, clip):
             output, encoded = model(src, trg)
             # output shape is code_len, batch, trg_vocab_size
 
-            encoded = encoded.squeeze(0)
+            #encoded = torch.reshape(encoded, (ret_N_LAYERS * batch_size, ret_HID_DIM))
 
             for cpj in range(encoded.shape[0]):
                 encoded_train_data[j+cpj] = encoded[cpj]
@@ -154,7 +154,7 @@ def ret_evaluate(model, valid_data, criterion):
     model.eval()
     epoch_loss = 0
 
-    encoded_valid_data = torch.zeros(valid_data.shape[0], ret_HID_DIM, device=device)
+    encoded_valid_data = torch.zeros(valid_data.shape[0], ret_HID_DIM, device=cuda_device)
     #print("encoded_valid_data.shape", encoded_valid_data.shape)
 
     if torch.cuda.is_available():
@@ -182,7 +182,7 @@ def ret_evaluate(model, valid_data, criterion):
                 output, encoded = model(src, trg, 0)
                 # output shape is code_len, batch, trg_vocab_size
 
-                encoded = encoded.squeeze(0)
+                #encoded = torch.reshape(encoded, (ret_N_LAYERS * batch_size, ret_HID_DIM))
 
 
                 for cpj in range(encoded.shape[0]):
@@ -474,7 +474,7 @@ def main():
 
 	annoy_tsne_test_vect = test_ann.get_item_vector(which_tsne_test_sample)
 	tsne_data = enc_train_vect[:num_tsne_train_data]
-	tsne_data_add = torch.zeros(11, enc_test_vect.shape[1], device=device)
+	tsne_data_add = torch.zeros(11, enc_test_vect.shape[1], device=cuda_device)
 	tsne_data_add[0] = enc_test_vect[which_tsne_test_sample]
 
 	nr = 1
@@ -496,11 +496,11 @@ def main():
     ############################### EDITOR #################################
 
 
-	ed_enc = CondAttnEncoder(src_vocab_size, trg_vocab_size, ed_hid_dim, ed_n_layers, ed_n_heads, ed_pf_dim, AttnEncoderLayer, SelfAttention, PositionwiseFeedforward, ed_dropout, device)
-	ed_dec = AttnDecoder(ed_output_dim, ed_hid_dim, ed_n_layers, ed_n_heads, ed_pf_dim, AttnDecoderLayer, SelfAttention, PositionwiseFeedforward, ed_dropout, device)
+	ed_enc = CondAttnEncoder(src_vocab_size, trg_vocab_size, ed_hid_dim, ed_n_layers, ed_n_heads, ed_pf_dim, AttnEncoderLayer, SelfAttention, PositionwiseFeedforward, ed_dropout, cuda_device)
+	ed_dec = AttnDecoder(ed_output_dim, ed_hid_dim, ed_n_layers, ed_n_heads, ed_pf_dim, AttnDecoderLayer, SelfAttention, PositionwiseFeedforward, ed_dropout, cuda_device)
 
 	ed_pad_idx = 0
-	ed_model = Editor(ed_enc, ed_dec, ed_pad_idx, device).to(device)
+	ed_model = Editor(ed_enc, ed_dec, ed_pad_idx, cuda_device).to(cuda_device)
 
 
 	for p in ed_model.parameters():
