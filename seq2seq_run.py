@@ -332,6 +332,22 @@ def main():
         #print("res_collapsed ", res_collapsed)
         print("X' comment", wordlist2comment_dict[res_collapsed])
 
+    for j in range(test_data.shape[0]):
+        ref = []
+        cand = []
+        for i in range(max_code_len):
+            ref_el = output_test_vect_reference[j][i].item()
+            cand_el = output_test_vect_candidates[j][i].item()
+            if ref_el > 0:
+                if ref_el in token_dict:
+                    ref += [token_dict[ref_el]]
+                if cand_el in token_dict:
+                    cand += [token_dict[cand_el]]
+        bleu = sentence_bleu([ref], cand)
+        all_bleu_scores += [bleu]
+        all_refs += [ref]
+        all_cands += [cand]
+
 
 
 if __name__== "__main__":

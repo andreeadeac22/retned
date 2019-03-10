@@ -301,9 +301,9 @@ def build_inverse_comment_dict():
     pickle.dump(wordlist2comment_dict, wordlist2comment)
 
 
-def split_data():
-    build_vocabs()
-    build_inverse_comment_dict()
+def split_data(opt):
+    #build_vocabs()
+    #build_inverse_comment_dict()
 
     dataset = pickle.load(open("dataset.pickle", "rb"))
 
@@ -311,6 +311,15 @@ def split_data():
     #dataset = torch.index_select(dataset, 0, random_index)
 
     np.random.shuffle(dataset)
+
+    if opt.fourthofdata:
+        print("Fourth of the data")
+        fraction25 = int(dataset.shape[0] / 4)
+        dataset = dataset[:fraction25]
+    if opt.halfdata:
+        print("Half data")
+        fraction50 = int(dataset.shape[0] / 2)
+        dataset = dataset[:fraction50]
 
     tenth = int(dataset.shape[0] / 10)
     print("tenth is {0:5d}".format(tenth))
