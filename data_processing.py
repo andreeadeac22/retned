@@ -19,7 +19,7 @@ import numpy as np
 from random import shuffle
 import torch
 
-#from graph_pb2 import *
+from graph_pb2 import *
 from vocabulary import *
 from constants import *
 from util import *
@@ -82,7 +82,7 @@ def parse_file(file_path, comment_code_dict, methodlen_dict):
         return comment_code_dict, methodlen_dict
 
 
-def build_dataset(fname= proto_list):
+def build_dataset(fname= proto_list, dataset_name="r252"):
     f = open(fname, "r")
     content = f.readlines()
     content = [x.strip() for x in content]
@@ -93,19 +93,19 @@ def build_dataset(fname= proto_list):
     for line in content:
         comment_code_dict, methodlen_dict = parse_file(line, comment_code_dict, methodlen_dict)
 
-    comment_code_file_write = open("commentcode.pickle", "wb")
+    comment_code_file_write = open(dataset_name + "commentcode.pickle", "wb")
     pickle.dump(comment_code_dict, comment_code_file_write)
 
 
-    comment_code_txt = open("commentcode.txt", "w")
+    comment_code_txt = open(dataset_name + "commentcode.txt", "w")
     for key in comment_code_dict:
         print(key, comment_code_dict[key], file=comment_code_txt)
 
 
-    methodlen_dict_file = open("methodlen.pickle", "wb")
+    methodlen_dict_file = open(dataset_name + "methodlen.pickle", "wb")
     pickle.dump(methodlen_dict, methodlen_dict_file)
 
-    methodlen_dict_txt = open("methodlen.txt", "w")
+    methodlen_dict_txt = open(dataset_name + "methodlen.txt", "w")
     for key in methodlen_dict:
         print(key, methodlen_dict[key], file=methodlen_dict_txt)
 
@@ -113,9 +113,9 @@ def build_dataset(fname= proto_list):
 
 
 
-def tokenfreq():
-    comment_code_file_read = open("commentcode.pickle", "rb")
-    comment_code_dict = pickle.load(comment_code_file_read)
+def tokenfreq(dataset_name = "r252"):
+    with open(dataset_name + "commentcode.pickle", "rb") as comment_code_file_read:
+        comment_code_dict = pickle.load(comment_code_file_read)
 
     token_freq = {}
     for comment in comment_code_dict:
@@ -126,24 +126,23 @@ def tokenfreq():
             else:
                 token_freq[token] = 1
 
-    token_freq_file = open("tokenfreq.pickle", "wb")
-    pickle.dump(token_freq, token_freq_file)
+    with open(dataset_name + "tokenfreq.pickle", "wb") as token_freq_file:
+        pickle.dump(token_freq, token_freq_file)
 
-    token_freq_txt = open("tokenfreq.txt", "w")
-    sorted_by_value = sorted(token_freq.items(), key=lambda kv: kv[1])
-    for k,v in sorted_by_value:
-        print(k, v, file=token_freq_txt)
+    with  open(dataset_name + "tokenfreq.txt", "w") as token_freq_txt:
+        sorted_by_value = sorted(token_freq.items(), key=lambda kv: kv[1])
+        for k,v in sorted_by_value:
+            print(k, v, file=token_freq_txt)
 
 
-def comment2list():
-    comment_code_file_read = open("commentcode.pickle", "rb")
-    comment_code_dict = pickle.load(comment_code_file_read)
+def comment2list(dataset_name='r252'):
+    with open(dataset_name + "commentcode.pickle", "rb") as comment_code_file_read:
+        comment_code_dict = pickle.load(comment_code_file_read)
     delimiters = ' ', "*", "\n", "/", "\t", "(", ")", "<", ">", "{", "}"
     regexPattern = '|'.join(map(re.escape, delimiters))
 
     comment2list_dict = {}
-    comment2list_txt = open("comment2list.txt", "w")
-    comment2list_file = open("comment2list.pickle", "wb")
+    comment2list_txt = open(dataset_name + "comment2list.txt", "w")
 
     for comment in comment_code_dict:
         comment_lines = comment.splitlines()
@@ -156,12 +155,13 @@ def comment2list():
         comment2list_dict[comment] = word_list
         print(comment, comment2list_dict[comment], file=comment2list_txt)
 
-    pickle.dump(comment2list_dict, comment2list_file)
+    with open(dataset_name + "comment2list.pickle", "wb") as comment2list_file:
+        pickle.dump(comment2list_dict, comment2list_file)
 
 
-def build_intmatrix():  #commentwords2vocab
-    comment2list_read = open("comment2list.pickle", "rb")
-    comment2list_dict = pickle.load(comment2list_read)
+def build_intmatrix(dataset_name='r252'):  #commentwords2vocab
+    with open(dataset_name + "comment2list.pickle", "rb") as comment2list_read:
+        comment2list_dict = pickle.load(comment2list_read)
 
     commentword_freq = {}
     max_comment_len = 0
@@ -176,17 +176,17 @@ def build_intmatrix():  #commentwords2vocab
                 commentword_freq[word] = 1
 
     print("Longest comment has {0:3d} tokens".format(max_comment_len)) # 296
-    commentword_freq_file = open("commentwordfreq.pickle", "wb")
-    pickle.dump(commentword_freq, commentword_freq_file)
+    with open(dataset_name + "commentwordfreq.pickle", "wb") as commentword_freq_file:
+        pickle.dump(commentword_freq, commentword_freq_file)
 
-    commentword_freq_txt = open("commentwordfreq.txt", "w")
-    sorted_by_value = sorted(commentword_freq.items(), key=lambda kv: kv[1])
-    for k,v in sorted_by_value:
-        print(k, v, file=commentword_freq_txt)
+    with open(dataset_name + "commentwordfreq.txt", "w") as commentword_freq_txt:
+        sorted_by_value = sorted(commentword_freq.items(), key=lambda kv: kv[1])
+        for k,v in sorted_by_value:
+            print(k, v, file=commentword_freq_txt)
 
 
-def build_vocabs():
-    commentword_freq_file = open("commentwordfreq.pickle", "rb")
+def build_vocabs(frequency_threshold=1, dataset_name="r252"):
+    commentword_freq_file = open(dataset_name + "commentwordfreq.pickle", "rb")
     commentword_freq = pickle.load(commentword_freq_file)
     sorted_by_value = sorted(commentword_freq.items(), key=lambda kv: kv[1])
     pruned_commentword_dict = {}
@@ -194,7 +194,7 @@ def build_vocabs():
     words_ids = {}
     ids_words = {}
     for k,v in sorted_by_value:
-        if v > 1:
+        if v > frequency_threshold:
             pruned_commentword_dict[k] = v
         else:
             unk_commentword += [k]
@@ -205,7 +205,7 @@ def build_vocabs():
     print("There are {0:6d} distinct tokens in comments".format(len(list(comment_words)))) # 14976 -> 8278
 
 
-    codeword_freq_file = open("tokenfreq.pickle", "rb")
+    codeword_freq_file = open(dataset_name + "tokenfreq.pickle", "rb")
     code_freq = pickle.load(codeword_freq_file)
 
     sorted_by_value = sorted(code_freq.items(), key=lambda kv: kv[1])
@@ -227,26 +227,36 @@ def build_vocabs():
         words_ids[word] = id
         ids_words[id] = word
 
-    pickle.dump(words_ids, open("word2idcommentvocab.pickle", "wb"))
-    pickle.dump(ids_words, open("commentvocab.pickle", "wb"))
+    pickle.dump(words_ids, open(dataset_name + "word2idcommentvocab.pickle", "wb"))
+    pickle.dump(ids_words, open(dataset_name + "commentvocab.pickle", "wb"))
 
     for id, token in enumerate(code_tokens, 1):
         tokens_ids[token] = id
         ids_tokens[id] = token
 
-    pickle.dump(ids_tokens, open("codevocab.pickle", "wb"))
+    pickle.dump(ids_tokens, open(dataset_name + "codevocab.pickle", "wb"))
 
-    #comment_vocab = Vocabulary.create_vocabulary((iter(comment_tokens), comment_counter), max_size=len(list(comment_tokens))) # include all comment tokens
-    #code_vocab = Vocabulary.create_vocabulary(code_tokens, max_size = len(list(code_tokens))) # include all code tokens
-
-    comment_code_file = open("commentcode.pickle", "rb")
+    comment_code_file = open(dataset_name + "commentcode.pickle", "rb")
     comment_code_dict = pickle.load(comment_code_file)
+
+    if dataset_name == 'r252':
+        max_comment_len = r252_max_comment_len
+        max_code_len = r252_max_code_len
+    if dataset_name == 'hstone':
+        max_comment_len = hstone_max_comment_len
+        max_code_len = hstone_max_code_len
 
     dataset = np.zeros((len(comment_code_dict), max_comment_len + max_code_len), dtype=int) # 150 is max_code_len
 
-    comment2list_read = open("comment2list.pickle", "rb")
-    comment2list_dict = pickle.load(comment2list_read)
+    with open(dataset_name + "comment2list.pickle", "rb") as comment2list_read:
+        comment2list_dict = pickle.load(comment2list_read)
 
+    if dataset_name == 'r252':
+        src_vocab_size = r252_src_vocab_size
+        trg_vocab_size = r252_trg_vocab_size
+    if dataset_name == 'hstone':
+        src_vocab_size = hstone_src_vocab_size
+        trg_vocab_size = hstone_trg_vocab_size
 
     for idx, comment in enumerate(comment_code_dict):
         code_token_list = comment_code_dict[comment]
@@ -264,29 +274,20 @@ def build_vocabs():
             else:
                 dataset[idx][max_comment_len+id] = trg_vocab_size -1
 
-        #code_token_list_vocab = code_vocab.get_id_or_unk_multiple(code_token_list)
-        #comment_word_list_vocab = comment_vocab.get_id_or_unk_multiple(comment_word_list)
+    with  open(dataset_name + "dataset.pickle", "wb") as dataset_file:
+        pickle.dump(dataset, dataset_file)
 
-        #print(comment_vocab.get_id_or_unk('Plusone'))
-
-        #dataset[idx][:len(code_token_list_vocab)] = code_token_list_vocab
-        #dataset[idx][max_comment_len:max_comment_len + len(comment_word_list_vocab)] = comment_word_list_vocab
-
-    dataset_file = open("dataset.pickle", "wb")
-    pickle.dump(dataset, dataset_file)
-
-    dataset_txt = open("dataset.txt", "w")
-    print(dataset, file=dataset_txt)
+    with open(dataset_name + "dataset.txt", "w") as dataset_txt:
+        print(dataset, file=dataset_txt)
 
 
-def build_inverse_comment_dict():
-    comment2list_read = open("comment2list.pickle", "rb")
-    comment2list_dict = pickle.load(comment2list_read)
+def build_inverse_comment_dict(dataset_name):
+    with open(dataset_name + "comment2list.pickle", "rb") as comment2list_read:
+        comment2list_dict = pickle.load(comment2list_read)
 
-    wordlist2comment = open("wordlist2comment.pickle", "wb")
-    wordlist2comment_file = open("wordlist2comment.txt", "w")
+    wordlist2comment_file = open(dataset_name + "wordlist2comment.txt", "w")
 
-    word2idcomment_dict = pickle.load(open("word2idcommentvocab.pickle", "rb"))
+    word2idcomment_dict = pickle.load(open(dataset_name + "word2idcommentvocab.pickle", "rb"))
 
     wordlist2comment_dict = {}
 
@@ -297,16 +298,25 @@ def build_inverse_comment_dict():
         wordlist2comment_dict[wordlist] = comment
         print(wordlist, comment, file=wordlist2comment_file)
 
+    with open(dataset_name + "wordlist2comment.pickle", "wb") as wordlist2comment:
+        pickle.dump(wordlist2comment_dict, wordlist2comment)
 
-    pickle.dump(wordlist2comment_dict, wordlist2comment)
+
+def r252_build_dataset(dataset_name='r252'):
+    build_dataset(dataset_name=dataset_name)
+    tokenfreq(dataset_name)
+    comment2list(dataset_name)
+    build_intmatrix(dataset_name)
+    build_vocabs(frequency_threshold = 0, dataset_name=dataset_name)
+    build_inverse_comment_dict(dataset_name)
+
+#r252_build_dataset('r252')
 
 
 def split_data(opt):
-    #build_vocabs()
-    #build_inverse_comment_dict()
-
-    dataset = pickle.load(open("dataset.pickle", "rb"))
-
+    dataset = pickle.load(open(opt.dataset_name + "dataset.pickle", "rb"))
+    print(len(dataset))
+    
     #random_index = torch.randperm(len(dataset))
     #dataset = torch.index_select(dataset, 0, random_index)
 
@@ -320,6 +330,10 @@ def split_data(opt):
         print("Half data")
         fraction50 = int(dataset.shape[0] / 2)
         dataset = dataset[:fraction50]
+    if opt.threefourthsofdata:
+        print("Three fourths")
+        fraction75 = int(3* dataset.shape[0] / 4)
+        dataset = dataset[:fraction75]
 
     tenth = int(dataset.shape[0] / 10)
     print("tenth is {0:5d}".format(tenth))

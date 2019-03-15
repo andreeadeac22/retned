@@ -36,15 +36,15 @@ from RNNDecoder import *
 from Seq2Seq import *
 
 
+SAVE_DIR = 'models'
+
+
 def train(model, train_data, optimizer, criterion, clip):
     model.train()
     epoch_loss = 0
 
     batch_num = 0
-    encoded_train_data = torch.zeros(train_data.shape[0], HID_DIM)
-    #print("encoded_train_data.shape", encoded_train_data.shape)
-
-    #train_losses = []
+    encoded_train_data = torch.zeros(train_data.shape[0], ret_HID_DIM)
 
     if torch.cuda.is_available():
         model.cuda()
@@ -60,58 +60,31 @@ def train(model, train_data, optimizer, criterion, clip):
                 interval = interval.cuda()
             batch = Variable(index_select(train_data, 0, interval))
             src = batch[:, :max_comment_len]
-            trg = batch[:, max_comment_len+1:]
-
-            onehot_trg = torch.FloatTensor(batch_size, max_code_len, trg_vocab_size)
-            if torch.cuda.is_available():
-                onehot_trg = onehot_trg.cuda()
-
-            for i in range(trg.shape[0]):
-                for k in range(max_code_len):
-                    if trg[i][k] > 0:
-                        onehot_trg[i][k][trg[i][k]] = 1
+            trg = batch[:, max_comment_len:]
 
             src = torch.transpose(src, 0, 1)
             trg = torch.transpose(trg, 0, 1)
-            onehot_trg = torch.transpose(onehot_trg, 0, 1)
 
             optimizer.zero_grad()
             output, encoded = model(src, trg)
             # output shape is code_len, batch, trg_vocab_size
 
-            encoded = encoded.squeeze(0)
-
-            #print("output.shape ", output.shape)
-            #print("encoded.shape ", encoded.shape)
+            #encoded = torch.reshape(encoded, (ret_N_LAYERS * batch_size, ret_HID_DIM))
 
             for cpj in range(encoded.shape[0]):
                 encoded_train_data[j+cpj] = encoded[cpj]
 
-            #encoded_train_data[j:j+min(train_data.shape[0], j + batch_size),:] = encoded
-
-            #trg = [trg sent len, batch size]
-            #output = [trg sent len, batch size, output dim]
-
-            #output = torch.transpose(output, 0, 1)
-            #onehot_trg = torch.transpose(onehot_trg, 0, 1)
 
             output = torch.reshape(output, (batch_size*max_code_len, trg_vocab_size))
             trg = torch.reshape(trg, (batch_size*max_code_len,))
 
-            #print("onehot_trg.shape", trg.shape)
-            #print("output.shape", output.shape)
-
             loss = criterion(output, trg)
 
-            #train_losses += [loss.item()]
-
-            #print("Train loss", loss.item())
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
             optimizer.step()
             epoch_loss += loss.item()
             print("Batch: {0:3d} | Loss: {1:.3f}".format(batch_num, loss.item()))
-    #return epoch_loss / batch_num, encoded_train_data, train_losses
     return epoch_loss / batch_num, encoded_train_data
 
 
@@ -120,15 +93,13 @@ def evaluate(model, valid_data, criterion):
     model.eval()
     epoch_loss = 0
 
-    encoded_valid_data = torch.zeros(valid_data.shape[0], HID_DIM)
+    encoded_valid_data = torch.zeros(valid_data.shape[0], ret_HID_DIM, device=cuda_device)
     #print("encoded_valid_data.shape", encoded_valid_data.shape)
 
     if torch.cuda.is_available():
         model.cuda()
         valid_data = valid_data.cuda()
         encoded_valid_data = encoded_valid_data.cuda()
-
-    #validation_losses = []
 
     with torch.no_grad():
         batch_num = 0
@@ -141,29 +112,17 @@ def evaluate(model, valid_data, criterion):
                     interval = interval.cuda()
                 batch = Variable(index_select(valid_data, 0, interval))
                 src = batch[:, :max_comment_len]
-                trg = batch[:, max_comment_len+1:]
+                trg = batch[:, max_comment_len:]
 
-                onehot_trg = torch.FloatTensor(batch_size, max_code_len, trg_vocab_size)
-                if torch.cuda.is_available():
-                    onehot_trg = onehot_trg.cuda()
-
-                for i in range(trg.shape[0]):
-                    for k in range(max_code_len):
-                        if trg[i][k] > 0:
-                            onehot_trg[i][k][trg[i][k]] = 1
 
                 src = torch.transpose(src, 0, 1)
                 trg = torch.transpose(trg, 0, 1)
-                onehot_trg = torch.transpose(onehot_trg, 0, 1)
-
 
                 output, encoded = model(src, trg, 0)
                 # output shape is code_len, batch, trg_vocab_size
 
-                encoded = encoded.squeeze(0)
+                #encoded = torch.reshape(encoded, (ret_N_LAYERS * batch_size, ret_HID_DIM))
 
-                #print("output.shape ", output.shape)
-                #print("encoded.shape ", encoded.shape)
 
                 for cpj in range(encoded.shape[0]):
                     encoded_valid_data[j+cpj] = encoded[cpj]
@@ -174,15 +133,9 @@ def evaluate(model, valid_data, criterion):
                 output = torch.reshape(output, (batch_size*max_code_len, trg_vocab_size))
                 trg = torch.reshape(trg, (batch_size*max_code_len,))
 
-                #output = torch.transpose(output, 0, 1)
-                #onehot_trg = torch.transpose(onehot_trg, 0, 1)
-
                 loss = criterion(output, trg)
-                #print("Valid loss", loss.item())
-                #validation_losses += [loss]
                 epoch_loss += loss.item()
                 print("Batch: {0:3d} | Loss: {1:.3f}".format(batch_num, loss.item()))
-    #return epoch_loss / batch_num, encoded_valid_data, validation_losses
     return epoch_loss / batch_num, encoded_valid_data
 
 
@@ -242,6 +195,7 @@ def train_valid_model(model, train_data, valid_data, optimizer, criterion):
         epoch_mins, epoch_secs = epoch_time(start_time, end_time)
         if valid_loss < best_valid_loss:
             best_valid_loss = valid_loss
+            MODEL_SAVE_PATH = os.path.join(SAVE_DIR, 'ret_only_model.pt')
             torch.save(model.state_dict(), MODEL_SAVE_PATH)
 
         times += [end_time - start_time]
@@ -260,6 +214,7 @@ def train_valid_model(model, train_data, valid_data, optimizer, criterion):
 
 
 def test_model(model, test_data, criterion):
+    MODEL_SAVE_PATH = os.path.join(SAVE_DIR, 'ret_only_model.pt')
     model.load_state_dict(torch.load(MODEL_SAVE_PATH))
     #test_loss, enc_test_vect, test_losses = evaluate(model, test_data, criterion)
     test_loss, enc_test_vect = evaluate(model, test_data, criterion)
@@ -269,23 +224,18 @@ def test_model(model, test_data, criterion):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--enc_model', default="RNNEncoder")
-    parser.add_argument('--dec_model', default="RNNDecoder")
-    parser.add_argument('--input_dim', default=src_vocab_size)
-    parser.add_argument('--output_dim', default=trg_vocab_size)
-    parser.add_argument('--enc_emb_dim', default=256)
-    parser.add_argument('--dec_emb_dim', default=256)
-    parser.add_argument('--hid_dim', default=512)
-    parser.add_argument('--n_layers', default=2)
-    parser.add_argument('--enc_dropout', default=0.5)
+    parser.add_argument('--resume_ret', action='store_true')
+    parser.add_argument('--fourthofdata', action='store_true')
+    parser.add_argument('--halfdata', action='store_true')
+    parser.add_argument('--threefourthsofdata', action='store_true')
+    opt = parser.parse_args()
 
+    train_data, valid_data, test_data = split_data(opt)
 
-    train_data, valid_data, test_data = split_data()
+    ret_enc = RNNEncoder(ret_INPUT_DIM, ret_ENC_EMB_DIM, ret_HID_DIM, ret_N_LAYERS, ret_ENC_DROPOUT)
+    ret_dec = RNNDecoder(ret_OUTPUT_DIM, ret_DEC_EMB_DIM, ret_HID_DIM, ret_N_LAYERS, ret_DEC_DROPOUT)
 
-    enc = RNNEncoder(INPUT_DIM, ENC_EMB_DIM, HID_DIM, N_LAYERS, ENC_DROPOUT)
-    dec = RNNDecoder(OUTPUT_DIM, DEC_EMB_DIM, HID_DIM, N_LAYERS, DEC_DROPOUT)
-
-    model = Seq2Seq(enc, dec, cuda_device).to(cuda_device)
+    model = Seq2Seq(ret_enc, ret_dec, cuda_device).to(cuda_device)
 
 
     print('The model has {0:9d} trainable parameters'.format(count_parameters(model)))
@@ -299,39 +249,66 @@ def main():
     enc_train_vect, enc_valid_vect = train_valid_model(model=model, train_data=train_data, valid_data=valid_data, optimizer=optimizer, criterion=criterion)
     enc_test_vect = test_model(model=model, test_data=test_data, criterion=criterion)
 
-    ann = create_annoy_index("RNNEncRNNDec", enc_train_vect)
-    #ann = AnnoyIndex(train_data.shape[1])
-    #ann.load("RNNEncRNNDec.annoy")
+
+    train_ann = create_annoy_index("AttnEncAttnDecTrain", enc_train_vect)
+    valid_ann = create_annoy_index("AttnEncAttnDecValid", enc_valid_vect)
+    test_ann = create_annoy_index("AttnEncAttnDecTest", enc_test_vect)
 
     wordlist2comment_dict = pickle.load(open("wordlist2comment.pickle", "rb"))
     word2idcommentvocab_dict = pickle.load(open("word2idcommentvocab.pickle", "rb"))
 
-    training_sample = train_data[0]
-    training_sample_comment = training_sample[:max_comment_len]
-    training_sample_code = training_sample[max_comment_len+1:]
+    sim_train_data = torch.zeros_like(train_data)
+    sim_valid_data = torch.zeros_like(valid_data)
+    sim_test_data = torch.zeros_like(test_data)
 
-    #print(training_sample_comment)
+    for training_sample_id in range(train_data.shape[0]):
+        training_sample_comment = train_data[training_sample_id][:max_comment_len]
+        training_sample_code = train_data[training_sample_id][max_comment_len+1:]
 
-    training_sample_wordlist = tensor2wordlist(training_sample_comment)
-    #print("training_sample_wordlist ", training_sample_wordlist)
-    collapsed = collapse_list2string(training_sample_wordlist, word2idcommentvocab_dict)
-    #print("collapsed ", collapsed)
-    print("Original x comment ", wordlist2comment_dict[collapsed])
+        annoy_vect = train_ann.get_item_vector(training_sample_id)
+        sim_vect_id = train_ann.get_nns_by_vector(annoy_vect, 1)
 
-    enc_train_vect_sample = enc_train_vect[0]
-    annoy_vect = ann.get_item_vector(0)
+        if sim_vect_id == training_sample_id:
+            print("Same id for training vect and similar vect")
+            exit(0)
 
-    for id in ann.get_nns_by_vector(annoy_vect, 5):
+        sim_train_data[training_sample_id] = train_data[sim_vect_id]
 
-        res = train_data[id]
-        res_comment = res[:max_comment_len]
-        #print("res_comment ", res_comment)
-        res_comment_wordlist = tensor2wordlist(res_comment)
-        #print("res_comment_wordlist", res_comment_wordlist)
-        res_collapsed = collapse_list2string(res_comment_wordlist, word2idcommentvocab_dict)
-        #print("res_collapsed ", res_collapsed)
-        print("X' comment", wordlist2comment_dict[res_collapsed])
+    for valid_sample_id in range(valid_data.shape[0]):
+        valid_sample_comment = valid_data[valid_sample_id][:max_comment_len]
+        valid_sample_code = valid_data[valid_sample_id][max_comment_len+1:]
 
+        annoy_vect = valid_ann.get_item_vector(valid_sample_id)
+        sim_vect_id = train_ann.get_nns_by_vector(annoy_vect, 1)
+
+        if sim_vect_id == valid_sample_id:
+            print("Same id for training vect and similar vect")
+            exit(0)
+
+        sim_valid_data[valid_sample_id] = train_data[sim_vect_id]
+
+    for test_sample_id in range(test_data.shape[0]):
+        test_sample_comment = test_data[test_sample_id][:max_comment_len]
+        test_sample_code = test_data[test_sample_id][max_comment_len+1:]
+
+        annoy_vect = test_ann.get_item_vector(test_sample_id)
+        sim_vect_id = train_ann.get_nns_by_vector(annoy_vect, 1)
+
+        if sim_vect_id == test_sample_id:
+            print("Same id for training vect and similar vect")
+            exit(0)
+
+        sim_test_data[test_sample_id] = train_data[sim_vect_id]
+
+    output_test_vect_reference = test_data[:, max_comment_len:]
+    output_test_vect_candidates = sim_test_data[:, max_comment_len:]
+
+    token_dict = pickle.load(open("codevocab.pickle", "rb"))
+
+
+    all_refs = []
+    all_cands = []
+    all_bleu_scores = []
     for j in range(test_data.shape[0]):
         ref = []
         cand = []
@@ -348,6 +325,13 @@ def main():
         all_refs += [ref]
         all_cands += [cand]
 
+    bleu_eval = {}
+    bleu_eval["scores"] = all_bleu_scores
+    bleu_eval["references"] = all_refs
+    bleu_eval["candidates"] = all_cands
+
+    print("Average BLEU score is ", sum(all_bleu_scores)/len(all_bleu_scores))
+    pickle.dump(bleu_eval, open("results/bleu_evaluation_results.pickle", "wb"))
 
 
 if __name__== "__main__":

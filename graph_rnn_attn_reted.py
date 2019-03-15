@@ -34,11 +34,10 @@ import time
 from annoy import AnnoyIndex
 
 from data_processing import *
-from hstone_process import *
 from constants import *
 from AttnEncoder import *
 from AttnDecoder import *
-from CondAttnEncoder import *
+from GraphCondAttnEncoder import *
 from editor import *
 from AttnEncoderLayer import *
 from AttnDecoderLayer import *
@@ -60,24 +59,7 @@ logging.basicConfig(
 SAVE_DIR = 'models'
 
 
-def ret_train(opt, model, train_data, optimizer, criterion, clip):
-    if opt.dataset_name == 'r252':
-        ret_INPUT_DIM = r252_src_vocab_size
-        ret_OUTPUT_DIM = r252_trg_vocab_size
-        ed_input_dim  = r252_src_vocab_size
-        ed_output_dim = r252_trg_vocab_size
-        max_comment_len = r252_max_comment_len
-        max_code_len = r252_max_code_len
-    if opt.dataset_name == 'hstone':
-        ret_INPUT_DIM = hstone_src_vocab_size
-        ret_OUTPUT_DIM = hstone_trg_vocab_size
-        ed_input_dim  = hstone_src_vocab_size
-        ed_output_dim = hstone_trg_vocab_size
-        max_comment_len = hstone_max_comment_len
-        max_code_len = hstone_max_code_len
-        src_vocab_size = hstone_src_vocab_size
-        trg_vocab_size = hstone_trg_vocab_size
-
+def ret_train(model, train_data, train_data_adj, optimizer, criterion, clip):
     model.train()
     epoch_loss = 0
 
@@ -87,6 +69,7 @@ def ret_train(opt, model, train_data, optimizer, criterion, clip):
     if torch.cuda.is_available():
         model.cuda()
         train_data = train_data.cuda()
+        train_data_adj = train_data_adj.cuda()
         encoded_train_data = encoded_train_data.cuda()
 
     for j in range(0, train_data.shape[0], batch_size): #TODO: replace batch_size with train_data.shape[0]
@@ -126,26 +109,7 @@ def ret_train(opt, model, train_data, optimizer, criterion, clip):
     return epoch_loss / batch_num, encoded_train_data
 
 
-def ed_train(opt, model, train_data, optimizer, criterion, clip):
-    if opt.dataset_name == 'r252':
-        ret_INPUT_DIM = r252_src_vocab_size
-        ret_OUTPUT_DIM = r252_trg_vocab_size
-        ed_input_dim  = r252_src_vocab_size
-        ed_output_dim = r252_trg_vocab_size
-        max_comment_len = r252_max_comment_len
-        max_code_len = r252_max_code_len
-        src_vocab_size = r252_src_vocab_size
-        trg_vocab_size = r252_trg_vocab_size
-    if opt.dataset_name == 'hstone':
-        ret_INPUT_DIM = hstone_src_vocab_size
-        ret_OUTPUT_DIM = hstone_trg_vocab_size
-        ed_input_dim  = hstone_src_vocab_size
-        ed_output_dim = hstone_trg_vocab_size
-        max_comment_len = hstone_max_comment_len
-        max_code_len = hstone_max_code_len
-        src_vocab_size = hstone_src_vocab_size
-        trg_vocab_size = hstone_trg_vocab_size
-
+def ed_train(model, train_data, train_data_adj, optimizer, criterion, clip):
     model.train()
     epoch_loss = 0
 
@@ -154,6 +118,7 @@ def ed_train(opt, model, train_data, optimizer, criterion, clip):
     if torch.cuda.is_available():
         model.cuda()
         train_data = train_data.cuda()
+        train_data_adj = train_data_adj.cuda()
 
     for j in range(0, train_data.shape[0], batch_size): #TODO: replace batch_size with train_data.shape[0]
         if j+ batch_size < train_data.shape[0]:
@@ -163,15 +128,17 @@ def ed_train(opt, model, train_data, optimizer, criterion, clip):
             if torch.cuda.is_available():
                 interval = interval.cuda()
             batch = Variable(index_select(train_data, 0, interval))
+            batch_adj = Variable(index_select(train_data_adj, 0, interval))
 
             x= batch[:, :max_comment_len]
             xprime = batch[:, max_comment_len+max_code_len: max_comment_len*2+max_code_len]
             yprime = batch[:, max_comment_len*2+max_code_len:]
+            yprime_adj = batch_adj
 
             trg = batch[:, max_comment_len:max_comment_len+max_code_len] # y
 
             optimizer.zero_grad()
-            output = model(x, xprime, yprime, trg)
+            output = model(x, xprime, yprime, yprime_adj, trg)
             # output shape is code_len, batch, trg_vocab_size
 
             output = torch.reshape(output, (batch_size*max_code_len, trg_vocab_size))
@@ -187,26 +154,7 @@ def ed_train(opt, model, train_data, optimizer, criterion, clip):
     return epoch_loss / batch_num, output
 
 
-def ret_evaluate(opt, model, valid_data, criterion):
-    if opt.dataset_name == 'r252':
-        ret_INPUT_DIM = r252_src_vocab_size
-        ret_OUTPUT_DIM = r252_trg_vocab_size
-        ed_input_dim  = r252_src_vocab_size
-        ed_output_dim = r252_trg_vocab_size
-        max_comment_len = r252_max_comment_len
-        max_code_len = r252_max_code_len
-        src_vocab_size = r252_src_vocab_size
-        trg_vocab_size = r252_trg_vocab_size
-    if opt.dataset_name == 'hstone':
-        ret_INPUT_DIM = hstone_src_vocab_size
-        ret_OUTPUT_DIM = hstone_trg_vocab_size
-        ed_input_dim  = hstone_src_vocab_size
-        ed_output_dim = hstone_trg_vocab_size
-        max_comment_len = hstone_max_comment_len
-        max_code_len = hstone_max_code_len
-        src_vocab_size = hstone_src_vocab_size
-        trg_vocab_size = hstone_trg_vocab_size
-
+def ret_evaluate(model, valid_data, valid_data_adj, criterion):
     model.eval()
     epoch_loss = 0
 
@@ -216,6 +164,7 @@ def ret_evaluate(opt, model, valid_data, criterion):
     if torch.cuda.is_available():
         model.cuda()
         valid_data = valid_data.cuda()
+        valid_data_adj = valid_data_adj.cuda()
         encoded_valid_data = encoded_valid_data.cuda()
 
     with torch.no_grad():
@@ -256,32 +205,14 @@ def ret_evaluate(opt, model, valid_data, criterion):
     return epoch_loss / batch_num, encoded_valid_data
 
 
-def ed_evaluate(opt, model, valid_data, criterion):
-    if opt.dataset_name == 'r252':
-        ret_INPUT_DIM = r252_src_vocab_size
-        ret_OUTPUT_DIM = r252_trg_vocab_size
-        ed_input_dim  = r252_src_vocab_size
-        ed_output_dim = r252_trg_vocab_size
-        max_comment_len = r252_max_comment_len
-        max_code_len = r252_max_code_len
-        src_vocab_size = r252_src_vocab_size
-        trg_vocab_size = r252_trg_vocab_size
-    if opt.dataset_name == 'hstone':
-        ret_INPUT_DIM = hstone_src_vocab_size
-        ret_OUTPUT_DIM = hstone_trg_vocab_size
-        ed_input_dim  = hstone_src_vocab_size
-        ed_output_dim = hstone_trg_vocab_size
-        max_comment_len = hstone_max_comment_len
-        max_code_len = hstone_max_code_len
-        src_vocab_size = hstone_src_vocab_size
-        trg_vocab_size = hstone_trg_vocab_size
-
+def ed_evaluate(model, valid_data, valid_data_adj, criterion):
     model.eval()
     epoch_loss = 0
 
     if torch.cuda.is_available():
         model.cuda()
         valid_data = valid_data.cuda()
+        valid_data_adj = valid_data_adj.cuda()
 
     ref_code = valid_data[:, max_comment_len:max_comment_len+max_code_len]
     candidate_code = torch.zeros_like(ref_code)
@@ -296,15 +227,17 @@ def ed_evaluate(opt, model, valid_data, criterion):
                 if torch.cuda.is_available():
                     interval = interval.cuda()
                 batch = Variable(index_select(valid_data, 0, interval))
+                batch_adj = Variable(index_select(valid_data_adj, 0, interval))
 
                 x= batch[:, :max_comment_len]
                 xprime = batch[:, max_comment_len+max_code_len: max_comment_len*2+max_code_len]
                 yprime = batch[:, max_comment_len*2+max_code_len:]
+                yprime_adj = batch_adj
 
                 trg = batch[:, max_comment_len:max_comment_len+max_code_len] # y
 
 
-                output = model(x, xprime, yprime, trg)
+                output = model(x, xprime, yprime, yprime_adj, trg)
                 # output shape is code_len, batch, trg_vocab_size
 
                 #trg = [trg sent len, batch size]
@@ -359,7 +292,7 @@ def create_annoy_index(fn, latent_space_vectors, num_trees=30):
     return ann
 
 
-def train_valid_model(opt, filename, which_train, which_evaluate, model, train_data, valid_data, optimizer, criterion):
+def train_valid_model(filename, which_train, which_evaluate, model, train_data, valid_data, train_data_adj, valid_data_adj, optimizer, criterion):
     best_valid_loss = float('inf')
 
     valid_losses = []
@@ -373,10 +306,8 @@ def train_valid_model(opt, filename, which_train, which_evaluate, model, train_d
     for epoch in range(N_EPOCHS):
         start_time = time.time()
 
-
-
-        train_loss, enc_train_vect = which_train(opt, model, train_data, optimizer, criterion, CLIP)
-        valid_loss, enc_valid_vect = which_evaluate(opt, model, valid_data, criterion)
+        train_loss, enc_train_vect = which_train(model, train_data,train_data_adj, optimizer,criterion, CLIP)
+        valid_loss, enc_valid_vect = which_evaluate(model, valid_data, valid_data_adj,criterion)
 
         end_time = time.time()
 
@@ -412,26 +343,26 @@ def train_valid_model(opt, filename, which_train, which_evaluate, model, train_d
         times += [end_time - start_time]
         print('| Epoch: {0:3d} | Time: {1:5d}m {2:5d}s| Train Loss: {3:.3f} | Train PPL: {4:7.3f} | Val. Loss: {5:.3f} | Val. PPL: {6:7.3f} |'.format(epoch+1, epoch_mins, epoch_secs, train_loss, math.exp(train_loss), valid_loss, math.exp(valid_loss)))
 
-    with open("results/" + opt.dataset_name + filename + "_train_losses.pickle", 'wb') as f:
+    with open("results/" + filename + "_train_losses.pickle", 'wb') as f:
         pickle.dump(train_losses, f)
-    with open("results/" + opt.dataset_name + filename + "_valid_losses.pickle", 'wb') as g:
+    with open("results/" + filename + "_valid_losses.pickle", 'wb') as g:
         pickle.dump(valid_losses, g)
-    with open("results/" + opt.dataset_name + filename + "_attn_times.pickle", 'wb') as h:
+    with open("results/" + filename + "_attn_times.pickle", 'wb') as h:
         pickle.dump(times, h)
 
-    with open("results/" + opt.dataset_name + filename + "_latent_space_vect.pickle", "wb") as j:
+    with open("results/" + filename + "_latent_space_vect.pickle", "wb") as j:
         pickle.dump(latent_space_vects, j)
 
-    plot_loss(filename = "results/" +  opt.dataset_name + filename + "_losses", train_losses=train_losses, valid_losses=valid_losses, num_epochs=epoch+1)
+    plot_loss(filename = "results/" + filename + "_losses", train_losses=train_losses, valid_losses=valid_losses, num_epochs=epoch+1)
     return enc_train_vect, enc_valid_vect
 
 
 
-def test_model(opt, filename, which_evaluate, model, test_data, criterion):
+def test_model(filename, which_evaluate, model, test_data, test_data_adj, criterion):
     MODEL_SAVE_PATH = os.path.join(SAVE_DIR, filename + '_model.pt')
     model.load_state_dict(torch.load(MODEL_SAVE_PATH))
     #test_loss, enc_test_vect, test_losses = evaluate(model, test_data, criterion)
-    test_loss, enc_test_vect_candidates = which_evaluate(opt, model, test_data, criterion)
+    test_loss, enc_test_vect_candidates = which_evaluate(model, test_data, test_data_adj, criterion)
     print('| Test Loss: {0:.3f} | Test PPL: {1:7.3f} |'.format(test_loss, math.exp(test_loss)))
     return enc_test_vect_candidates
 
@@ -450,29 +381,9 @@ def main():
     parser.add_argument('--resume_ret', action='store_true')
     parser.add_argument('--fourthofdata', action='store_true')
     parser.add_argument('--halfdata', action='store_true')
-    parser.add_argument('--threefourthsofdata', action='store_true')
-    parser.add_argument('--dataset_name', default='r252')
 
     opt = parser.parse_args()
 
-    if opt.dataset_name == 'r252':
-        ret_INPUT_DIM = r252_src_vocab_size
-        ret_OUTPUT_DIM = r252_trg_vocab_size
-        ed_input_dim  = r252_src_vocab_size
-        ed_output_dim = r252_trg_vocab_size
-        max_comment_len = r252_max_comment_len
-        max_code_len = r252_max_code_len
-        src_vocab_size = r252_src_vocab_size
-        trg_vocab_size = r252_trg_vocab_size
-    if opt.dataset_name == 'hstone':
-        ret_INPUT_DIM = hstone_src_vocab_size
-        ret_OUTPUT_DIM = hstone_trg_vocab_size
-        ed_input_dim  = hstone_src_vocab_size
-        ed_output_dim = hstone_trg_vocab_size
-        max_comment_len = hstone_max_comment_len
-        max_code_len = hstone_max_code_len
-        src_vocab_size = hstone_src_vocab_size
-        trg_vocab_size = hstone_trg_vocab_size
 
     ############################### RETRIEVER #################################
 
@@ -490,30 +401,40 @@ def main():
         os.makedirs('models')
 
     if opt.resume_ret:
-        with open("results/" + opt.dataset_name + "ret" + "_data.pickle", "rb") as k:
+        with open("results/" + "ret" + "_data.pickle", "rb") as k:
             data = pickle.load(k)
+
         train_data = data["train"]
         valid_data = data["valid"]
         test_data = data["test"]
+        train_data_adj = data["train_adj"]
+        valid_data_adj =data["valid_adj"]
+        test_data_adj = data["test_adj"]
+
         print("valid data", valid_data)
+
         MODEL_SAVE_PATH = os.path.join(SAVE_DIR, "ret" + '_model.pt')
         ret_model.load_state_dict(torch.load(MODEL_SAVE_PATH))
-        with open("results/" + opt.dataset_name + "ret" + "_latent_space_vect.pickle", "rb") as j:
+
+        with open("results/" + "ret" + "_latent_space_vect.pickle", "rb") as j:
             latent_space_vects = pickle.load(j)
             enc_train_vect = latent_space_vects["train"]
             enc_valid_vect = latent_space_vects["valid"]
     else:
-        train_data, valid_data, test_data = split_data(opt)
+        train_data, valid_data, test_data, train_data_adj, valid_data_adj, test_data_adj = split_data(opt)
         data = {}
         data["train"] = train_data
         data["valid"] = valid_data
         data["test"] = test_data
+        data["train_adj"] = train_data_adj
+        data["valid_adj"] = valid_data_adj
+        data["test_adj"] = test_data_adj
 
-        with open("results/" + opt.dataset_name + "ret" + "_data.pickle", "wb") as k:
+        with open("results/" + "ret" + "_data.pickle", "wb") as k:
             pickle.dump(data, k)
-            enc_train_vect, enc_valid_vect = train_valid_model(opt=opt, filename="ret", which_train=ret_train, which_evaluate=ret_evaluate, model=ret_model, train_data=train_data, valid_data=valid_data, optimizer=ret_optimizer, criterion=ret_criterion)
+        enc_train_vect, enc_valid_vect = train_valid_model(filename="ret", which_train=ret_train, which_evaluate=ret_evaluate, model=ret_model, train_data=train_data, valid_data=valid_data, train_data_adj=train_data_adj, valid_data_adj=valid_data_adj, optimizer=ret_optimizer, criterion=ret_criterion)
 
-    enc_test_vect = test_model(opt=opt, filename="ret", which_evaluate= ret_evaluate, model=ret_model, test_data=test_data, criterion=ret_criterion)
+    enc_test_vect = test_model(filename="ret", which_evaluate= ret_evaluate, model=ret_model, test_data=test_data, test_data_adj=test_data_adj, criterion=ret_criterion)
 
     ######################## NEAREST NEIGHBOUR #################################
 
@@ -522,8 +443,8 @@ def main():
     valid_ann = create_annoy_index("AttnEncAttnDecValid", enc_valid_vect)
     test_ann = create_annoy_index("AttnEncAttnDecTest", enc_test_vect)
 
-    wordlist2comment_dict = pickle.load(open(opt.dataset_name + "wordlist2comment.pickle", "rb"))
-    word2idcommentvocab_dict = pickle.load(open(opt.dataset_name + "word2idcommentvocab.pickle", "rb"))
+    wordlist2comment_dict = pickle.load(open("wordlist2comment.pickle", "rb"))
+    word2idcommentvocab_dict = pickle.load(open("word2idcommentvocab.pickle", "rb"))
 
     sim_train_data = torch.zeros_like(train_data)
     sim_valid_data = torch.zeros_like(valid_data)
@@ -605,7 +526,7 @@ def main():
     ############################### EDITOR #################################
 
 
-    ed_enc = CondAttnEncoder(src_vocab_size, trg_vocab_size, ed_hid_dim, ed_n_layers, ed_n_heads, ed_pf_dim, AttnEncoderLayer, SelfAttention, PositionwiseFeedforward, ed_dropout, cuda_device)
+    ed_enc = GraphCondAttnEncoder(src_vocab_size, trg_vocab_size, ed_hid_dim, ed_n_layers, ed_n_heads, ed_pf_dim, AttnEncoderLayer, SelfAttention, PositionwiseFeedforward, ed_dropout, cuda_device)
     ed_dec = AttnDecoder(ed_output_dim, ed_hid_dim, ed_n_layers, ed_n_heads, ed_pf_dim, AttnDecoderLayer, SelfAttention, PositionwiseFeedforward, ed_dropout, cuda_device)
 
     ed_pad_idx = 0
@@ -621,12 +542,12 @@ def main():
     ed_optimizer = optim.Adam(ed_model.parameters())
     ed_criterion = nn.CrossEntropyLoss()
 
-    output_train_vect, output_valid_vect_candidates = train_valid_model(opt=opt, filename= "ed", which_train=ed_train, which_evaluate=ed_evaluate, model=ed_model, train_data=new_train_data, valid_data=new_valid_data, optimizer=ed_optimizer, criterion=ed_criterion)
+    output_train_vect, output_valid_vect_candidates = train_valid_model(filename= "ed", which_train=ed_train, which_evaluate=ed_evaluate, model=ed_model, train_data=new_train_data, valid_data=new_valid_data, train_data_adj=train_data_adj, valid_data_adj=valid_data_adj, optimizer=ed_optimizer, criterion=ed_criterion)
     #print("Test model")
-    output_test_vect_candidates = test_model(opt=opt, filename="ed", which_evaluate=ed_evaluate, model=ed_model, test_data=new_test_data, criterion=ed_criterion)
+    output_test_vect_candidates = test_model(filename="ed", which_evaluate=ed_evaluate, model=ed_model, test_data=new_test_data, test_data_adj=test_data_adj, criterion=ed_criterion)
     output_test_vect_reference = test_data[:, max_comment_len:]
 
-    token_dict = pickle.load(open(opt.dataset_name +"codevocab.pickle", "rb"))
+    token_dict = pickle.load(open("codevocab.pickle", "rb"))
 
 
     all_refs = []
@@ -654,7 +575,7 @@ def main():
     bleu_eval["candidates"] = all_cands
 
     print("Average BLEU score is ", sum(all_bleu_scores)/len(all_bleu_scores))
-    pickle.dump(bleu_eval, open("results/" + opt.dataset_name + "bleu_evaluation_results.pickle", "wb"))
+    pickle.dump(bleu_eval, open("results/bleu_evaluation_results.pickle", "wb"))
 
 if __name__== "__main__":
     main()
